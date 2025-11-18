@@ -58,8 +58,7 @@ const handleGeminiError = (error: any, context: string): Error => {
     } else if (originalErrorMessage.toLowerCase().includes('fetch')) {
         userFriendlyMessage = "A network error occurred. Please check your internet connection and try again.";
     } else if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('API Key is missing')) {
-        // This will catch invalid API key errors from the backend.
-        userFriendlyMessage = "The Gemini API Key is missing or invalid. Please check your Cloud Run/Firebase environment variables.";
+        userFriendlyMessage = "Configuration Error: The Gemini API Key is missing. Please add 'VITE_API_KEY' to your Cloud Run Variables & Secrets.";
     } else {
         userFriendlyMessage = `An unexpected error occurred: ${originalErrorMessage}`;
     }
@@ -213,11 +212,11 @@ export interface CardIdentification {
 
 // Helper to safely initialize the AI client
 const getAIClient = () => {
-  // Support both standard process.env (which we polyfill in vite.config) and Vite's import.meta.env
+  // Prioritize the VITE_API_KEY which is injected by our vite.config.ts
   const apiKey = process.env.API_KEY || import.meta.env?.VITE_API_KEY;
 
   if (!apiKey) {
-      throw new Error("Gemini API Key is missing. Please ensure the API_KEY (or VITE_API_KEY) environment variable is set in your Cloud Run/Firebase configuration.");
+      throw new Error("API Key is missing. Please set VITE_API_KEY in your environment variables.");
   }
   return new GoogleGenAI({ apiKey });
 };
