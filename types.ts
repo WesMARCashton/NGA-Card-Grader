@@ -1,4 +1,11 @@
 
+declare global {
+  interface Window {
+    env: {
+      VITE_API_KEY: string;
+    }
+  }
+}
 
 export interface User {
   id: string;

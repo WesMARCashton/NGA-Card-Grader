@@ -212,11 +212,12 @@ export interface CardIdentification {
 
 // Helper to safely initialize the AI client
 const getAIClient = () => {
-  // Prioritize the VITE_API_KEY which is injected by our vite.config.ts
-  const apiKey = process.env.API_KEY || import.meta.env?.VITE_API_KEY;
+  // Prioritize the VITE_API_KEY which is injected by our server.js into window.env
+  // Fallback to import.meta.env for local dev if configured
+  const apiKey = window.env?.VITE_API_KEY || import.meta.env?.VITE_API_KEY;
 
   if (!apiKey) {
-      throw new Error("API Key is missing. Please set VITE_API_KEY in your environment variables.");
+      throw new Error("API Key is missing. Please set VITE_API_KEY in your Cloud Run Variables & Secrets.");
   }
   return new GoogleGenAI({ apiKey });
 };
