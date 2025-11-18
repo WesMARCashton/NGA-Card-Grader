@@ -58,7 +58,7 @@ const handleGeminiError = (error: any, context: string): Error => {
     } else if (originalErrorMessage.toLowerCase().includes('fetch')) {
         userFriendlyMessage = "A network error occurred. Please check your internet connection and try again.";
     } else if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('API Key is missing')) {
-        userFriendlyMessage = "Configuration Error: The Gemini API Key is missing. Please add 'VITE_API_KEY' to your Cloud Run Variables & Secrets.";
+        userFriendlyMessage = "Configuration Error: The Gemini API Key is missing. Please check your Cloud Run Variables & Secrets.";
     } else {
         userFriendlyMessage = `An unexpected error occurred: ${originalErrorMessage}`;
     }
