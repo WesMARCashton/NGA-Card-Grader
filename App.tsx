@@ -53,18 +53,21 @@ const App: React.FC = () => {
     }
   }, [user]);
   
-  const handleSyncWithDrive = useCallback(async () => {
+  /**
+   * Handles syncing with Google Drive.
+   * @param silent If true, tries to sync without any popups. If it fails, sets status to error but doesn't crash.
+   */
+  const handleSyncWithDrive = useCallback(async (silent: boolean = false) => {
     if (!user || !getAccessToken) return;
 
     setSyncStatus('loading');
     setError(null);
     try {
-      const token = await getAccessToken();
+      // Pass 'silent' flag to getAccessToken
+      const token = await getAccessToken(silent);
       const { fileId, cards: loadedCards } = await getCollection(token);
       
       // ** DATA MIGRATION STEP **
-      // This ensures that cards saved before the 'status' field was added
-      // are correctly handled and displayed in the collection.
       const migratedCards = loadedCards.map(card => {
           if (!card.status) {
               return { ...card, status: 'reviewed' as const };
@@ -75,42 +78,60 @@ const App: React.FC = () => {
       setCards(migratedCards);
       setDriveFileId(fileId);
       setSyncStatus('success');
-      // Only switch view if we have cards, otherwise stay on scanner
-      if (migratedCards.length > 0) {
-        // Optional: automatically switch to history. 
-        // Removed to prevent jarring UX if user just wants to scan.
-      }
     } catch (err: any) {
       console.error("Failed to sync with Google Drive", err);
+      
+      // Handle interaction required specifically
+      if (err.message === 'interaction_required') {
+          if (silent) {
+              // If silent failed, just stop loading and maybe let user know they need to click sync
+              setSyncStatus('idle'); 
+              // Don't show a huge error for silent failure, just reset.
+              return;
+          }
+      }
+
       const errorMessage = err?.message || (typeof err === 'string' ? err : 'An unknown error occurred during sync.');
       setError(errorMessage);
       setSyncStatus('error');
+
+      // If it's a hard auth error (not just interaction required), sign out to reset state
+      if (errorMessage.toLowerCase().includes('permission') || 
+          errorMessage.toLowerCase().includes('access token') ||
+          errorMessage.toLowerCase().includes('timed out')) {
+          // Optional: Auto sign out if the token is completely borked
+          // signOut(); 
+      }
     }
   }, [user, getAccessToken]);
 
   // Auto-sync on initial load when user is ready
+  // We use silent=true to avoid popup blockers
   useEffect(() => {
     if (user && isAuthReady && syncStatus === 'idle') {
-      handleSyncWithDrive();
+      handleSyncWithDrive(true);
     }
   }, [user, isAuthReady, syncStatus, handleSyncWithDrive]);
 
   const saveCollectionToDrive = useCallback(async (cardsToSave: CardData[]) => {
+    // Use silent=true for background saves too
     if (!user || !getAccessToken || syncStatus === 'loading') return;
-    setError(null);
+    
+    // Don't clear main error state for background saves to avoid flickering
     try {
-      const token = await getAccessToken();
+      const token = await getAccessToken(true); 
       const newFileId = await saveCollection(token, driveFileId, cardsToSave);
       if (newFileId !== driveFileId) {
         setDriveFileId(newFileId);
       }
-      // If sync was previously idle (e.g., first save), mark as success.
       if (syncStatus === 'idle') {
           setSyncStatus('success');
       }
     } catch (err: any) {
       console.error("Failed to save collection to Google Drive", err);
-      setError(err.message || "Failed to save your collection. Please check your connection.");
+      if (err.message !== 'interaction_required') {
+           setError(err.message || "Failed to save your collection. Please check your connection.");
+      }
     }
   }, [user, getAccessToken, driveFileId, syncStatus]);
   
@@ -201,9 +222,7 @@ const App: React.FC = () => {
     });
   }, [saveCollectionToDrive]);
 
-  // This effect acts as a queue manager, processing cards up to the concurrency limit.
   useEffect(() => {
-    // Find cards that need processing and are not already in flight
     const cardsInQueue = cards.filter(c => 
         ['grading', 'challenging', 'regenerating_summary'].includes(c.status) &&
         !processingCards.current.has(c.id)
@@ -212,17 +231,15 @@ const App: React.FC = () => {
     const availableSlots = CONCURRENCY_LIMIT - processingCards.current.size;
 
     if (cardsInQueue.length > 0 && availableSlots > 0) {
-        // We can process more cards. Take the next ones from the queue.
         const cardsToStart = cardsInQueue.slice(0, availableSlots);
         cardsToStart.forEach(card => processCardInBackground(card));
     }
-  }, [cards, processCardInBackground]); // This effect re-evaluates whenever the cards list changes
+  }, [cards, processCardInBackground]);
   
   const handleChallengeExistingCard = useCallback((cardToChallenge: CardData, direction: 'higher' | 'lower') => {
     setCards(currentCards => {
         const updatedCards = currentCards.map(c => 
             c.id === cardToChallenge.id 
-            // FIX: Use 'as const' to ensure TypeScript infers the correct literal type for status.
             ? { ...c, status: 'challenging' as const, challengeDirection: direction } 
             : c
         );
@@ -233,7 +250,6 @@ const App: React.FC = () => {
 
   const handleAcceptGrade = useCallback(async (cardId: string) => {
       setCards(currentCards => {
-          // FIX: Use 'as const' to ensure TypeScript infers the correct literal type for status.
           const updatedCards = currentCards.map(c => c.id === cardId ? { ...c, status: 'reviewed' as const } : c);
           saveCollectionToDrive(updatedCards);
           return updatedCards;
@@ -244,7 +260,6 @@ const App: React.FC = () => {
       setCards(currentCards => {
         const updatedCards = currentCards.map(c => 
             c.id === cardToUpdate.id 
-            // FIX: Use 'as const' to ensure TypeScript infers the correct literal type for status.
             ? { ...c, status: 'regenerating_summary' as const, overallGrade: newGrade, gradeName: newGradeName } 
             : c
         );
@@ -280,6 +295,8 @@ const App: React.FC = () => {
                     const statusUpdater = (status: string) => setRewriteStatusMessage(`Card #${cardIndex + 1}: ${status}`);
                     const frontImageBase64 = dataUrlToBase64(card.frontImage);
                     const backImageBase64 = dataUrlToBase64(card.backImage);
+                    // We need to pass silent=true here if we implemented it in this function, 
+                    // but since this function only calls Gemini API, we rely on VITE_API_KEY, not getAccessToken.
                     const regeneratedData = await regenerateCardAnalysisForGrade(
                         frontImageBase64, backImageBase64,
                         { name: card.name!, team: card.team!, set: card.set!, edition: card.edition!, cardNumber: card.cardNumber!, company: card.company!, year: card.year! },
@@ -332,7 +349,7 @@ const App: React.FC = () => {
       if (!user || !getAccessToken) return;
       setError(null);
       try {
-          const token = await getAccessToken();
+          const token = await getAccessToken(false); // Interactive
           const sheetUrl = localStorage.getItem('google_sheet_url');
           if (!sheetUrl) {
               setError("No Google Sheet URL found. Please perform a bulk sync first to configure it.");
@@ -367,7 +384,7 @@ const App: React.FC = () => {
                   cards={cards} 
                   onBack={() => setView('scanner')} 
                   onDelete={handleDeleteCard} 
-                  getAccessToken={getAccessToken} 
+                  getAccessToken={() => getAccessToken(false)} 
                   onCardsSynced={handleCardsSynced}
                   onChallengeGrade={handleChallengeExistingCard}
                   onResync={handleResyncCard}
@@ -397,10 +414,10 @@ const App: React.FC = () => {
     const needsReviewCount = cards.filter(c => c.status === 'needs_review').length;
     
     return (
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         {/* Manual Sync Button */}
         <button 
-            onClick={handleSyncWithDrive} 
+            onClick={() => handleSyncWithDrive(false)} // Manual click = interactive mode 
             disabled={syncStatus === 'loading'}
             className={`flex items-center justify-center w-10 h-10 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300 ${syncStatus === 'loading' ? 'cursor-not-allowed opacity-70' : ''}`}
             title={syncStatus === 'loading' ? 'Syncing...' : 'Sync with Drive'}
@@ -418,12 +435,17 @@ const App: React.FC = () => {
           className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300"
         >
           <HistoryIcon className="h-5 w-5" />
-          <span>{view === 'history' ? 'Back to Scanner' : `My Collection (${cards.length})`}</span>
+          <span className="hidden sm:inline">{view === 'history' ? 'Scanner' : `Collection (${cards.length})`}</span>
           {needsReviewCount > 0 && view !== 'history' && (
             <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white text-xs font-bold">
               {needsReviewCount}
             </span>
           )}
+        </button>
+        
+        {/* Explicit Sign Out Button for safety */}
+        <button onClick={signOut} className="hidden md:block text-sm font-semibold text-slate-500 hover:text-red-600 px-2">
+            Sign Out
         </button>
       </div>
     );
@@ -431,7 +453,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen font-sans flex flex-col items-center p-4">
-        <header className="w-full max-w-4xl mx-auto flex justify-between items-center p-4">
+        <header className="w-full max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center p-4 gap-4">
             <img src="https://mcusercontent.com/d7331d7f90c4b088699bd7282/images/98cb8f09-7621-798a-803a-26d394c7b10f.png" alt="MARC AI Grader Logo" className="h-10 w-auto" />
             <div className="flex items-center gap-4">
               {renderHeaderControls()}
@@ -440,9 +462,15 @@ const App: React.FC = () => {
         </header>
         <main className="w-full flex-grow flex flex-col justify-center items-center">
             {error && (
-                <div className="w-full max-w-md bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">
+                <div className="w-full max-w-md bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4 shadow-md" role="alert">
                     <strong className="font-bold">Error: </strong>
                     <span className="block sm:inline">{error}</span>
+                    {/* Add a manual Retry/Sign out link in error box if auth failed */}
+                    {(error.includes('permission') || error.includes('timed out')) && (
+                        <div className="mt-2">
+                             <button onClick={signOut} className="underline font-bold hover:text-red-900">Click here to Sign Out and Reset</button>
+                        </div>
+                    )}
                     <span className="absolute top-0 bottom-0 right-0 px-4 py-3" onClick={() => setError(null)}>
                         <svg className="fill-current h-6 w-6 text-red-500" role="button" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><title>Close</title><path d="M14.348 14.849a1.2 1.2 0 0 1-1.697 0L10 11.819l-2.651 3.029a1.2 1.2 0 1 1-1.697-1.697l2.758-3.15-2.759-3.152a1.2 1.2 0 1 1 1.697-1.697L10 8.183l2.651-3.031a1.2 1.2 0 1 1 1.697 1.697l-2.758 3.152 2.758 3.15a1.2 1.2 0 0 1 0 1.698z"/></svg>
                     </span>

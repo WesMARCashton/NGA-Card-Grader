@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { User } from '../types';
 
@@ -55,14 +56,14 @@ export const useGoogleAuth = () => {
     }
   };
 
-  const signOut = () => {
-    if (google) {
+  const signOut = useCallback(() => {
+    if (typeof google !== 'undefined' && google.accounts) {
         google.accounts.id.disableAutoSelect();
     }
     setUser(null);
     localStorage.removeItem('user');
     cachedTokenRef.current = null;
-  };
+  }, []);
 
   useEffect(() => {
     const initializeGsi = () => {
@@ -74,7 +75,7 @@ export const useGoogleAuth = () => {
             return;
         }
 
-        if (google) {
+        if (typeof google !== 'undefined' && google.accounts) {
             google.accounts.id.initialize({
                 client_id: clientId,
                 callback: handleCredentialResponse,
@@ -83,14 +84,14 @@ export const useGoogleAuth = () => {
             const client = google.accounts.oauth2.initTokenClient({
               client_id: clientId,
               scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/spreadsheets',
-              callback: () => {},
+              callback: () => {}, // Callback is overridden per request
             });
             setTokenClient(client);
             setIsAuthReady(true); // Signal that the auth client is ready
         }
     }
     
-    if (google) {
+    if (typeof google !== 'undefined') {
         initializeGsi();
     } else {
       const script = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
@@ -102,11 +103,18 @@ export const useGoogleAuth = () => {
 
   }, []);
 
-  const getAccessToken = useCallback((): Promise<string> => {
+  /**
+   * Request an access token.
+   * @param silent If true, attempts to get token without user interaction (no popups). 
+   *               If this fails (e.g. interaction required), it rejects.
+   */
+  const getAccessToken = useCallback((silent: boolean = false): Promise<string> => {
+    // 1. Check Cache
     if (cachedTokenRef.current && Date.now() < cachedTokenRef.current.expiresAt - (5 * 60 * 1000)) {
       return Promise.resolve(cachedTokenRef.current.token);
     }
     
+    // 2. Check In-Flight Requests
     if (inFlightTokenRequest.current) {
       return inFlightTokenRequest.current;
     }
@@ -114,11 +122,19 @@ export const useGoogleAuth = () => {
     const authPromise = new Promise<string>((resolve, reject) => {
       if (!tokenClient) {
         inFlightTokenRequest.current = null;
-        return reject(new Error('Authentication client not ready.'));
+        return reject(new Error('Authentication client not ready. Please wait or refresh.'));
       }
       
+      // 3. Set Timeout (Prevent hanging forever)
+      const timeoutId = setTimeout(() => {
+          inFlightTokenRequest.current = null;
+          reject(new Error('Authentication timed out. Please try signing in again.'));
+      }, 15000); // 15 second timeout
+
       tokenClient.callback = (tokenResponse: any) => {
+        clearTimeout(timeoutId);
         inFlightTokenRequest.current = null;
+        
         if (tokenResponse && tokenResponse.access_token) {
           const expiresInMs = (tokenResponse.expires_in || 3600) * 1000;
           cachedTokenRef.current = {
@@ -128,12 +144,22 @@ export const useGoogleAuth = () => {
           resolve(tokenResponse.access_token);
         } else {
           console.error('Google Auth Error Response:', tokenResponse);
-          const error = tokenResponse?.error_description || tokenResponse?.error || 'Failed to retrieve access token. Permission may have been denied by the user or an admin policy.';
-          reject(new Error(error));
+          const error = tokenResponse?.error_description || tokenResponse?.error || 'Failed to retrieve access token.';
+          
+          // If we tried silent and failed, propagate specific error so we can fallback to interactive
+          if (silent && (error === 'interaction_required' || tokenResponse?.error === 'interaction_required')) {
+              reject(new Error('interaction_required'));
+          } else {
+              reject(new Error(error));
+          }
         }
       };
 
-      tokenClient.requestAccessToken({ prompt: '' });
+      // 4. Request Token
+      // If silent is true, use prompt: '' to attempt background auth. 
+      // Otherwise use undefined (default) or explicit consent if needed.
+      const config = silent ? { prompt: '' } : { prompt: 'consent' };
+      tokenClient.requestAccessToken(config);
     });
 
     inFlightTokenRequest.current = authPromise;
