@@ -66,7 +66,6 @@ const App: React.FC = () => {
       // are correctly handled and displayed in the collection.
       const migratedCards = loadedCards.map(card => {
           if (!card.status) {
-              // FIX: Use 'as const' to ensure TypeScript infers the correct literal type for status.
               return { ...card, status: 'reviewed' as const };
           }
           return card;
@@ -75,7 +74,10 @@ const App: React.FC = () => {
       setCards(migratedCards);
       setDriveFileId(fileId);
       setSyncStatus('success');
-      setView('history'); // Automatically go to history view after successful sync
+      // Only switch view if we have cards, otherwise stay on scanner
+      if (migratedCards.length > 0) {
+        setView('history');
+      }
     } catch (err: any) {
       console.error("Failed to sync with Google Drive", err);
       const errorMessage = err?.message || (typeof err === 'string' ? err : 'An unknown error occurred during sync.');
@@ -83,6 +85,13 @@ const App: React.FC = () => {
       setSyncStatus('error');
     }
   }, [user, getAccessToken]);
+
+  // Auto-sync on initial load when user is ready
+  useEffect(() => {
+    if (user && isAuthReady && syncStatus === 'idle') {
+      handleSyncWithDrive();
+    }
+  }, [user, isAuthReady, syncStatus, handleSyncWithDrive]);
 
   const saveCollectionToDrive = useCallback(async (cardsToSave: CardData[]) => {
     if (!user || !getAccessToken || syncStatus === 'loading') return;
@@ -384,24 +393,23 @@ const App: React.FC = () => {
     if (!user) return null;
     if (syncStatus === 'loading') return <button disabled className="py-2 px-4 bg-slate-500 text-white font-semibold rounded-lg shadow-md animate-pulse">Syncing...</button>;
     if (syncStatus === 'error') return <button onClick={handleSyncWithDrive} className="py-2 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition">Sync Failed. Retry?</button>;
-    if (syncStatus === 'success') {
-      const needsReviewCount = cards.filter(c => c.status === 'needs_review').length;
-      return (
-        <button 
-          onClick={() => setView(view === 'history' ? 'scanner' : 'history')} 
-          className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300"
-        >
-          <HistoryIcon className="h-5 w-5" />
-          <span>{view === 'history' ? 'Back to Scanner' : `My Collection (${cards.length})`}</span>
-          {needsReviewCount > 0 && view !== 'history' && (
-            <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white text-xs font-bold">
-              {needsReviewCount}
-            </span>
-          )}
-        </button>
-      );
-    }
-    return <button onClick={handleSyncWithDrive} disabled={!isAuthReady} className="py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition disabled:opacity-50">Sync with Google Drive</button>;
+    
+    // Default state (idle or success) - allows user to toggle views
+    const needsReviewCount = cards.filter(c => c.status === 'needs_review').length;
+    return (
+      <button 
+        onClick={() => setView(view === 'history' ? 'scanner' : 'history')} 
+        className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300"
+      >
+        <HistoryIcon className="h-5 w-5" />
+        <span>{view === 'history' ? 'Back to Scanner' : `My Collection (${cards.length})`}</span>
+        {needsReviewCount > 0 && view !== 'history' && (
+          <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white text-xs font-bold">
+            {needsReviewCount}
+          </span>
+        )}
+      </button>
+    );
   };
 
   return (

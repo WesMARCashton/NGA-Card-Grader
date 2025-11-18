@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import { CardData, EvaluationDetails } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
@@ -58,9 +57,9 @@ const handleGeminiError = (error: any, context: string): Error => {
         userFriendlyMessage = "The AI returned an invalid response. This can be intermittent. Please try again.";
     } else if (originalErrorMessage.toLowerCase().includes('fetch')) {
         userFriendlyMessage = "A network error occurred. Please check your internet connection and try again.";
-    } else if (originalErrorMessage.includes('api key')) {
+    } else if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('API Key is missing')) {
         // This will catch invalid API key errors from the backend.
-        userFriendlyMessage = "The provided API Key is invalid. Please check your .env file and Google Cloud settings.";
+        userFriendlyMessage = "The Gemini API Key is missing or invalid. Please check your Cloud Run/Firebase environment variables.";
     } else {
         userFriendlyMessage = `An unexpected error occurred: ${originalErrorMessage}`;
     }
@@ -212,10 +211,20 @@ export interface CardIdentification {
     year: string;
 }
 
+// Helper to safely initialize the AI client
+const getAIClient = () => {
+  // Support both standard process.env (which we polyfill in vite.config) and Vite's import.meta.env
+  const apiKey = process.env.API_KEY || import.meta.env?.VITE_API_KEY;
+
+  if (!apiKey) {
+      throw new Error("Gemini API Key is missing. Please ensure the API_KEY (or VITE_API_KEY) environment variable is set in your Cloud Run/Firebase configuration.");
+  }
+  return new GoogleGenAI({ apiKey });
+};
+
 // STEP 1: Identify the card
 export const identifyCard = async (frontImageBase64: string, backImageBase64: string): Promise<CardIdentification> => {
-    // FIX: Use `process.env.API_KEY` as per the coding guidelines. This resolves the TypeScript error with `import.meta.env`.
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAIClient();
     const prompt = `
       **Task:** Identify the sports card from the provided images.
       **Instructions:** Analyze the images and determine the player name, team, year, set, manufacturer (company), card number, and any specific edition (e.g., 'Base', 'Chrome').
@@ -267,8 +276,7 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 
 // STEP 2 & 3 Combined: Grade the card's condition, calculate final grade, and write summary
 export const gradeAndSummarizeCard = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string, summary: string }> => {
-    // FIX: Use `process.env.API_KEY` as per the coding guidelines.
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAIClient();
     const prompt = `
       **Task:** Perform a complete NGA grading analysis of the provided card images.
       ${NGA_GRADING_GUIDE}
@@ -345,8 +353,7 @@ export const challengeGrade = async (
     onStatusUpdate: (status: string) => void
 ): Promise<{ details: EvaluationDetails, summary: string, overallGrade: number, gradeName: string }> => {
     onStatusUpdate('Initializing AI model for challenge...');
-    // FIX: Use `process.env.API_KEY` as per the coding guidelines.
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAIClient();
 
     const challengePrompt = `
       **Persona & Task:**
@@ -469,8 +476,7 @@ export const regenerateCardAnalysisForGrade = async (
     onStatusUpdate: (status: string) => void
 ): Promise<{ details: EvaluationDetails, summary: string }> => {
     onStatusUpdate('Initializing AI model for analysis...');
-    // FIX: Use `process.env.API_KEY` as per the coding guidelines.
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAIClient();
 
     const prompt = `
       **Persona & Task:**
