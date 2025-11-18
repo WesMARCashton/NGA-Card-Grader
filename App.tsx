@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -14,7 +15,7 @@ import {
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
 import { syncToSheet } from './services/sheetsService';
-import { HistoryIcon, ResyncIcon, SpinnerIcon } from './components/icons';
+import { HistoryIcon, ResyncIcon, SpinnerIcon, KeyIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
 import { ApiKeyModal } from './components/ApiKeyModal';
 
@@ -447,6 +448,15 @@ const App: React.FC = () => {
     
     return (
       <div className="flex items-center gap-2">
+         {/* Manual Key Entry Button */}
+        <button
+            onClick={() => setIsApiKeyModalOpen(true)}
+            className="p-2 text-slate-500 hover:text-blue-600 rounded-full hover:bg-slate-100 transition-colors"
+            title="Set API Key Manually"
+        >
+            <KeyIcon className="w-5 h-5" />
+        </button>
+
         {/* Load Collection Button - Visible if logged in but not synced */}
         {!hasCollectionLoaded && (
           <button 
