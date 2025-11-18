@@ -1,3 +1,4 @@
+
 import { CardData } from '../types';
 
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
@@ -6,7 +7,8 @@ const FILE_NAME = 'card_collection.json';
 
 // Helper to find the file in appDataFolder
 const findFileId = async (accessToken: string): Promise<string | null> => {
-    const response = await fetch(`${DRIVE_API_URL}/files?spaces=appDataFolder&fields=files(id,name)&q=name='${FILE_NAME}'`, {
+    // Added 'and trashed=false' to ensure we don't pick up deleted files
+    const response = await fetch(`${DRIVE_API_URL}/files?spaces=appDataFolder&fields=files(id,name)&q=name='${FILE_NAME}' and trashed=false`, {
         headers: { 'Authorization': `Bearer ${accessToken}` }
     });
     if (!response.ok) {

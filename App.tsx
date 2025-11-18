@@ -78,6 +78,11 @@ const App: React.FC = () => {
       setCards(migratedCards);
       setDriveFileId(fileId);
       setSyncStatus('success');
+
+      if (!silent) {
+          alert(`Sync Complete! Found ${migratedCards.length} cards in your collection.`);
+      }
+
     } catch (err: any) {
       console.error("Failed to sync with Google Drive", err);
       
