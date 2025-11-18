@@ -21,6 +21,14 @@ import { ApiKeyModal } from './components/ApiKeyModal';
 
 type SyncStatus = 'idle' | 'loading' | 'success' | 'error';
 
+// Robust ID generator that works in all contexts (secure and non-secure)
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+};
+
 const App: React.FC = () => {
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
   
@@ -216,7 +224,7 @@ const App: React.FC = () => {
     setError(null);
     
     const newCard: CardData = {
-      id: crypto.randomUUID(),
+      id: generateId(), // Use robust ID generator
       frontImage: frontImageDataUrl,
       backImage: backImageDataUrl,
       timestamp: Date.now(),
