@@ -230,6 +230,18 @@ const App: React.FC = () => {
         return updatedCards;
     });
   }, [saveCollectionToDrive]);
+  
+  const handleRetryGrading = useCallback((cardToRetry: CardData) => {
+    setCards(currentCards => {
+        const updatedCards = currentCards.map(c => 
+            c.id === cardToRetry.id 
+            ? { ...c, status: 'grading' as const, errorMessage: undefined } 
+            : c
+        );
+        saveCollectionToDrive(updatedCards);
+        return updatedCards;
+    });
+  }, [saveCollectionToDrive]);
 
   useEffect(() => {
     const cardsInQueue = cards.filter(c => 
@@ -405,6 +417,7 @@ const App: React.FC = () => {
                   onCardsSynced={handleCardsSynced}
                   onChallengeGrade={handleChallengeExistingCard}
                   onResync={handleResyncCard}
+                  onRetryGrading={handleRetryGrading}
                   onRewriteAllAnalyses={handleRewriteAllAnalyses}
                   resetRewriteState={resetRewriteState}
                   isRewriting={isRewriting}

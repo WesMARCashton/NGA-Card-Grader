@@ -15,6 +15,7 @@ interface CardHistoryProps {
   onCardsSynced: (syncedCards: CardData[]) => void;
   onChallengeGrade: (card: CardData, direction: 'higher' | 'lower') => void;
   onResync: (card: CardData) => Promise<void>;
+  onRetryGrading: (card: CardData) => void; // Added new prop
   onRewriteAllAnalyses: () => Promise<void>;
   resetRewriteState: () => void;
   isRewriting: boolean;
@@ -24,7 +25,7 @@ interface CardHistoryProps {
   rewriteStatusMessage: string;
   onAcceptGrade: (cardId: string) => void;
   onManualGrade: (card: CardData, grade: number, gradeName: string) => void;
-  onLoadCollection?: () => void; // Added prop for manual load
+  onLoadCollection?: () => void; 
 }
 
 type ResyncState = 'idle' | 'syncing' | 'success';
@@ -73,7 +74,7 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
     <div 
       key={card.id} 
       className={`bg-white p-4 rounded-lg flex items-center gap-4 shadow-lg transition-all duration-300 ${isProcessing ? 'opacity-70' : 'cursor-pointer hover:shadow-xl hover:scale-[1.01]'}`}
-      onClick={!isProcessing ? onSelect : undefined}
+      onClick={!isProcessing || card.status === 'grading_failed' ? onSelect : undefined} // Allow selecting failed cards
     >
       <img src={ensureDataUrl(card.frontImage)} alt="Card front" className="w-16 h-22 object-contain rounded-md bg-slate-100"/>
       <div className="flex-grow">
@@ -83,7 +84,9 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
                 <p className="text-sm text-slate-600">{card.year} {card.set} #{card.cardNumber}</p>
             </>
         ) : (
-            <p className="font-bold text-lg text-slate-500">Card Identification in Progress...</p>
+            <p className="font-bold text-lg text-slate-500">
+                {card.status === 'grading_failed' ? 'Grading Failed' : 'Card Identification in Progress...'}
+            </p>
         )}
       </div>
       <div className="flex items-center gap-2">
@@ -126,7 +129,7 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
 };
 
 export const CardHistory: React.FC<CardHistoryProps> = ({ 
-    cards, onBack, onDelete, getAccessToken, onCardsSynced, onChallengeGrade, onResync, 
+    cards, onBack, onDelete, getAccessToken, onCardsSynced, onChallengeGrade, onResync, onRetryGrading,
     onRewriteAllAnalyses, resetRewriteState, isRewriting, rewriteProgress, rewrittenCount, 
     rewriteFailCount, rewriteStatusMessage, onAcceptGrade, onManualGrade, onLoadCollection
 }) => {
@@ -301,6 +304,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
           onAcceptGrade={onAcceptGrade}
           onDelete={onDelete}
           onManualGrade={onManualGrade}
+          onRetryGrading={onRetryGrading} // Pass to modal
         />
       )}
       {isSheetModalOpen && (

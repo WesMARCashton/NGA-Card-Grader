@@ -1,8 +1,9 @@
+
 import React, { useState } from 'react';
 import { CardData } from '../types';
 import { GradeDisplay, EvaluationRow } from './GradeDisplays';
 import { ImageLightbox } from './ImageLightbox';
-import { GavelIcon, ArrowUpIcon, ArrowDownIcon, SpinnerIcon, CheckIcon, TrashIcon, EditIcon } from './icons';
+import { GavelIcon, ArrowUpIcon, ArrowDownIcon, SpinnerIcon, CheckIcon, TrashIcon, EditIcon, ResyncIcon } from './icons';
 import { ensureDataUrl } from '../utils/fileUtils';
 import { ManualGradeModal } from './ManualGradeModal';
 
@@ -14,6 +15,7 @@ interface CardDetailModalProps {
   onAcceptGrade: (cardId: string) => void;
   onDelete: (cardId: string) => void;
   onManualGrade: (card: CardData, grade: number, gradeName: string) => void;
+  onRetryGrading?: (card: CardData) => void; // Make optional
 }
 
 const InfoPill: React.FC<{ label: string, value?: string }> = ({ label, value }) => (
@@ -23,7 +25,7 @@ const InfoPill: React.FC<{ label: string, value?: string }> = ({ label, value })
   </div>
 );
 
-export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose, onChallengeGrade, onAcceptGrade, onDelete, onManualGrade }) => {
+export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose, onChallengeGrade, onAcceptGrade, onDelete, onManualGrade, onRetryGrading }) => {
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const [isChallenging, setIsChallenging] = useState(false);
   const [isManualEntry, setIsManualEntry] = useState(false);
@@ -44,6 +46,13 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
     onAcceptGrade(card.id);
     onClose();
   };
+  
+  const handleRetry = () => {
+      if (onRetryGrading) {
+          onRetryGrading(card);
+          onClose();
+      }
+  }
 
   const handleRemove = () => {
     if (window.confirm('Are you sure you want to remove this card from your collection? This action cannot be undone.')) {
@@ -53,7 +62,25 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
   };
   
   const renderFooter = () => {
-    if (card.status === 'needs_review' || card.status === 'grading_failed') {
+    if (card.status === 'grading_failed') {
+        return (
+            <div className="pt-4 border-t space-y-3">
+                 <div className="grid grid-cols-3 gap-3">
+                    <button onClick={handleRetry} className="flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition transform hover:scale-105">
+                        <ResyncIcon className="w-5 h-5" /> Retry Grading
+                    </button>
+                    <button onClick={() => setIsManualEntry(true)} className="flex items-center justify-center gap-2 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-lg transition transform hover:scale-105">
+                        <EditIcon className="w-5 h-5" /> Manual Entry
+                    </button>
+                    <button onClick={handleRemove} className="flex items-center justify-center gap-2 py-3 px-4 bg-red-100 hover:bg-red-200 text-red-800 font-bold rounded-lg transition transform hover:scale-105">
+                        <TrashIcon className="w-5 h-5" /> Remove
+                    </button>
+                </div>
+            </div>
+        )
+    }
+  
+    if (card.status === 'needs_review') {
       return (
         <div className="pt-4 border-t space-y-3">
           {isChallenging ? (
