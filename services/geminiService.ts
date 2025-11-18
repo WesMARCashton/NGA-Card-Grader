@@ -212,11 +212,19 @@ export interface CardIdentification {
 
 // Helper to safely initialize the AI client
 const getAIClient = () => {
+  // Explicitly check window.env existence to avoid TS errors or runtime issues
+  const env = (window as any).env;
+  
   // Prioritize the VITE_API_KEY which is injected by our server.js into window.env
   // Fallback to import.meta.env for local dev if configured
-  const apiKey = window.env?.VITE_API_KEY || import.meta.env?.VITE_API_KEY;
+  const apiKey = env?.VITE_API_KEY || import.meta.env?.VITE_API_KEY;
 
   if (!apiKey) {
+      // Log helpful info for debugging in the browser console
+      console.error("Gemini API Key Check Failed.");
+      console.error("Value in window.env.VITE_API_KEY:", env?.VITE_API_KEY ? 'Present' : 'Missing');
+      console.error("Value in import.meta.env.VITE_API_KEY:", import.meta.env?.VITE_API_KEY ? 'Present' : 'Missing');
+      
       throw new Error("API Key is missing. Please set VITE_API_KEY in your Cloud Run Variables & Secrets.");
   }
   return new GoogleGenAI({ apiKey });

@@ -10,7 +10,9 @@ const app = express();
 const port = process.env.PORT || 8080;
 
 // Serve static files from the dist directory
-app.use(express.static(path.join(__dirname, 'dist')));
+// IMPORTANT: { index: false } prevents Express from automatically serving index.html
+// This ensures the request falls through to the '*' handler below where we inject the API key
+app.use(express.static(path.join(__dirname, 'dist'), { index: false }));
 
 // Handle all other routes by serving index.html with injected environment variables
 app.get('*', (req, res) => {
