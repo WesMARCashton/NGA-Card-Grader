@@ -105,13 +105,7 @@ const App: React.FC = () => {
     }
   }, [user, getAccessToken]);
 
-  // Auto-sync on initial load when user is ready
-  // We use silent=true to avoid popup blockers
-  useEffect(() => {
-    if (user && isAuthReady && syncStatus === 'idle') {
-      handleSyncWithDrive(true);
-    }
-  }, [user, isAuthReady, syncStatus, handleSyncWithDrive]);
+  // REMOVED AUTO-SYNC USE EFFECT to restore manual control
 
   const saveCollectionToDrive = useCallback(async (cardsToSave: CardData[]) => {
     // Use silent=true for background saves too
@@ -397,6 +391,7 @@ const App: React.FC = () => {
                   rewriteStatusMessage={rewriteStatusMessage}
                   onAcceptGrade={handleAcceptGrade}
                   onManualGrade={handleManualGrade}
+                  onLoadCollection={() => handleSyncWithDrive(false)} // Manual load prop
                 />;
       case 'scanner':
       default:
@@ -412,24 +407,23 @@ const App: React.FC = () => {
     if (!user) return null;
     
     const needsReviewCount = cards.filter(c => c.status === 'needs_review').length;
+    const hasCollectionLoaded = !!driveFileId || cards.length > 0;
     
     return (
       <div className="flex items-center gap-2">
-        {/* Manual Sync Button */}
-        <button 
-            onClick={() => handleSyncWithDrive(false)} // Manual click = interactive mode 
-            disabled={syncStatus === 'loading'}
-            className={`flex items-center justify-center w-10 h-10 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300 ${syncStatus === 'loading' ? 'cursor-not-allowed opacity-70' : ''}`}
-            title={syncStatus === 'loading' ? 'Syncing...' : 'Sync with Drive'}
-        >
-             {syncStatus === 'loading' ? (
-                 <SpinnerIcon className="w-5 h-5 text-blue-600" />
-             ) : (
-                 <ResyncIcon className={`w-5 h-5 ${syncStatus === 'error' ? 'text-red-500' : 'text-slate-600'}`} />
-             )}
-        </button>
+        {/* Load Collection Button - Visible if logged in but not synced */}
+        {!hasCollectionLoaded && (
+          <button 
+              onClick={() => handleSyncWithDrive(false)}
+              disabled={syncStatus === 'loading'}
+              className="flex items-center gap-2 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg shadow-md transition disabled:opacity-50"
+          >
+              {syncStatus === 'loading' ? <SpinnerIcon className="w-4 h-4" /> : <ResyncIcon className="w-4 h-4" />}
+              <span className="hidden sm:inline">Load Drive</span>
+          </button>
+        )}
 
-        {/* Navigation Button - Always Visible */}
+        {/* Navigation Button */}
         <button 
           onClick={() => setView(view === 'history' ? 'scanner' : 'history')} 
           className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300"

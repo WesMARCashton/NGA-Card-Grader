@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { CardData } from '../types';
 import { ExportIcon, BackIcon, TrashIcon, GoogleSheetIcon, ResyncIcon, SpinnerIcon, CheckIcon } from './icons';
@@ -25,6 +24,7 @@ interface CardHistoryProps {
   rewriteStatusMessage: string;
   onAcceptGrade: (cardId: string) => void;
   onManualGrade: (card: CardData, grade: number, gradeName: string) => void;
+  onLoadCollection?: () => void; // Added prop for manual load
 }
 
 type ResyncState = 'idle' | 'syncing' | 'success';
@@ -128,7 +128,7 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
 export const CardHistory: React.FC<CardHistoryProps> = ({ 
     cards, onBack, onDelete, getAccessToken, onCardsSynced, onChallengeGrade, onResync, 
     onRewriteAllAnalyses, resetRewriteState, isRewriting, rewriteProgress, rewrittenCount, 
-    rewriteFailCount, rewriteStatusMessage, onAcceptGrade, onManualGrade
+    rewriteFailCount, rewriteStatusMessage, onAcceptGrade, onManualGrade, onLoadCollection
 }) => {
   const [selectedCard, setSelectedCard] = useState<CardData | null>(null);
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
@@ -173,6 +173,33 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
     link.click();
     document.body.removeChild(link);
   };
+  
+  // Special Empty State View with Manual Sync Button
+  if (cards.length === 0) {
+      return (
+        <div className="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6 text-center">
+             <div className="flex justify-start">
+                <button onClick={onBack} className="flex items-center gap-2 text-blue-600 hover:text-blue-500 transition">
+                    <BackIcon className="w-5 h-5" />
+                    Back to Scanner
+                </button>
+             </div>
+             
+             <div className="py-12 bg-slate-100/50 rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center gap-4">
+                <p className="text-lg font-medium text-slate-600">No cards loaded yet.</p>
+                {onLoadCollection && (
+                    <button 
+                        onClick={onLoadCollection}
+                        className="flex items-center gap-2 py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white text-lg font-bold rounded-full shadow-lg transition-transform transform hover:scale-105"
+                    >
+                        <ResyncIcon className="w-6 h-6" />
+                        Load Collection from Google Drive
+                    </button>
+                )}
+             </div>
+        </div>
+      );
+  }
 
   return (
     <>
