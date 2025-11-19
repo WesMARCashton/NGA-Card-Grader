@@ -27,9 +27,17 @@ export const dataUrlToBase64 = (dataUrl: string): string => {
  * @returns A full data URL string or an empty string if input is invalid.
  */
 export const ensureDataUrl = (imageData: any): string => {
-    if (!imageData || typeof imageData !== 'string') return '';
+    // Strict type check: if it's not a string (e.g. null, undefined, number, object), return empty string.
+    if (imageData === null || imageData === undefined || typeof imageData !== 'string') {
+        return '';
+    }
+    
     if (imageData.startsWith('data:')) {
         return imageData;
     }
-    return `data:image/jpeg;base64,${imageData}`;
+    // Only append prefix if it looks like a base64 string (not empty)
+    if (imageData.length > 0) {
+        return `data:image/jpeg;base64,${imageData}`;
+    }
+    return '';
 };

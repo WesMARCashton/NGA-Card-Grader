@@ -83,7 +83,6 @@ const App: React.FC = () => {
             });
 
             // Only restore if we don't have cards yet (e.g., initial load)
-            // This acts as a cache-first strategy to ensure we don't lose unsynced work
             setCards(current => {
               if (current.length === 0) {
                 return recoveredCards;
@@ -127,7 +126,6 @@ const App: React.FC = () => {
       
       // ** ROBUST DATA SANITIZATION **
       // Filter out completely corrupt entries and ensure required fields exist with CORRECT TYPES
-      // This prevents the "White Screen" crash if old data is missing images or IDs, or if numbers are strings
       const validCards = loadedCards.filter((c: any) => c && typeof c === 'object').map((card: any) => {
           // Safety checks for type consistency
           const safeId = (typeof card.id === 'string' && card.id) ? card.id : generateId();
@@ -144,13 +142,32 @@ const App: React.FC = () => {
               if (isNaN(safeGrade)) safeGrade = undefined;
           }
 
+          // STRICTLY RECONSTRUCT THE OBJECT
+          // Do NOT use ...card (spread operator) because it copies hidden objects/garbage from old versions
+          // We force every display field to be a String or Undefined to prevent React render crashes.
           return { 
-              ...card, 
               id: safeId,
               status: safeStatus as CardData['status'], 
               frontImage: safeFront,
               backImage: safeBack,
-              overallGrade: safeGrade
+              timestamp: typeof card.timestamp === 'number' ? card.timestamp : Date.now(),
+              gradingSystem: 'NGA' as const,
+              isSynced: true, // Mark as synced from drive
+
+              // Force string conversion for all display fields
+              name: card.name ? String(card.name) : undefined,
+              team: card.team ? String(card.team) : undefined,
+              set: card.set ? String(card.set) : undefined,
+              edition: card.edition ? String(card.edition) : undefined,
+              cardNumber: card.cardNumber ? String(card.cardNumber) : undefined,
+              company: card.company ? String(card.company) : undefined,
+              year: card.year ? String(card.year) : undefined,
+              summary: card.summary ? String(card.summary) : undefined,
+              errorMessage: card.errorMessage ? String(card.errorMessage) : undefined,
+              gradeName: card.gradeName ? String(card.gradeName) : undefined,
+              
+              overallGrade: safeGrade,
+              details: card.details // details is deep structure, usually safe, but handled by optional chaining in UI
           };
       });
 
@@ -172,7 +189,6 @@ const App: React.FC = () => {
       // Handle interaction required specifically
       if (err.message === 'interaction_required') {
           if (silent) {
-              // If silent failed, just stop loading
               setSyncStatus('idle'); 
               return;
           }
@@ -181,22 +197,12 @@ const App: React.FC = () => {
       const errorMessage = err?.message || (typeof err === 'string' ? err : 'An unknown error occurred during sync.');
       setError(errorMessage);
       setSyncStatus('error');
-
-      // If it's a hard auth error (not just interaction required), sign out to reset state
-      if (errorMessage.toLowerCase().includes('permission') || 
-          errorMessage.toLowerCase().includes('access token') ||
-          errorMessage.toLowerCase().includes('timed out')) {
-          // Optional: Auto sign out if the token is completely borked
-          // signOut(); 
-      }
     }
   }, [user, getAccessToken]);
 
   const saveCollectionToDrive = useCallback(async (cardsToSave: CardData[]) => {
-    // Use silent=true for background saves too
     if (!user || !getAccessToken || syncStatus === 'loading') return;
     
-    // Don't clear main error state for background saves to avoid flickering
     try {
       const token = await getAccessToken(true); 
       const newFileId = await saveCollection(token, driveFileId, cardsToSave);
@@ -302,7 +308,7 @@ const App: React.FC = () => {
     setError(null);
     
     const newCard: CardData = {
-      id: generateId(), // Use robust ID generator
+      id: generateId(),
       frontImage: frontImageDataUrl,
       backImage: backImageDataUrl,
       timestamp: Date.now(),
@@ -358,7 +364,6 @@ const App: React.FC = () => {
 
   const handleAcceptGrade = useCallback(async (cardId: string) => {
       setCards(currentCards => {
-          // Transition to 'generating_summary' instead of 'reviewed' immediately
           const updatedCards = currentCards.map(c => c.id === cardId ? { ...c, status: 'generating_summary' as const } : c);
           saveCollectionToDrive(updatedCards);
           return updatedCards;
@@ -404,8 +409,6 @@ const App: React.FC = () => {
                     const statusUpdater = (status: string) => setRewriteStatusMessage(`Card #${cardIndex + 1}: ${status}`);
                     const frontImageBase64 = dataUrlToBase64(card.frontImage);
                     const backImageBase64 = dataUrlToBase64(card.backImage);
-                    // We need to pass silent=true here if we implemented it in this function, 
-                    // but since this function only calls Gemini API, we rely on VITE_API_KEY, not getAccessToken.
                     const regeneratedData = await regenerateCardAnalysisForGrade(
                         frontImageBase64, backImageBase64,
                         { name: card.name!, team: card.team!, set: card.set!, edition: card.edition!, cardNumber: card.cardNumber!, company: card.company!, year: card.year! },
@@ -419,7 +422,6 @@ const App: React.FC = () => {
                 } catch (err: any) {
                     if (err.message === 'API_KEY_MISSING') {
                          setIsApiKeyModalOpen(true);
-                         // Break queue processing
                          queue.length = 0; 
                          throw err;
                     }
@@ -535,7 +537,6 @@ const App: React.FC = () => {
     
     return (
       <div className="flex items-center gap-2">
-         {/* Manual Key Entry Button */}
         <button
             onClick={() => setIsApiKeyModalOpen(true)}
             className="p-2 text-slate-500 hover:text-blue-600 rounded-full hover:bg-slate-100 transition-colors"
@@ -544,7 +545,6 @@ const App: React.FC = () => {
             <KeyIcon className="w-5 h-5" />
         </button>
 
-        {/* Load Collection Button - Visible if logged in but not synced */}
         {!hasCollectionLoaded && (
           <button 
               onClick={() => handleSyncWithDrive(false)}
@@ -556,7 +556,6 @@ const App: React.FC = () => {
           </button>
         )}
 
-        {/* Navigation Button */}
         <button 
           onClick={() => setView(view === 'history' ? 'scanner' : 'history')} 
           className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300"
@@ -570,7 +569,6 @@ const App: React.FC = () => {
           )}
         </button>
         
-        {/* Explicit Sign Out Button for safety */}
         <button onClick={signOut} className="hidden md:block text-sm font-semibold text-slate-500 hover:text-red-600 px-2">
             Sign Out
         </button>
@@ -592,7 +590,6 @@ const App: React.FC = () => {
                 <div className="w-full max-w-md bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4 shadow-md" role="alert">
                     <strong className="font-bold">Error: </strong>
                     <span className="block sm:inline">{error}</span>
-                    {/* Add a manual Retry/Sign out link in error box if auth failed */}
                     {(error.includes('permission') || error.includes('timed out')) && (
                         <div className="mt-2">
                              <button onClick={signOut} className="underline font-bold hover:text-red-900">Click here to Sign Out and Reset</button>
@@ -609,7 +606,6 @@ const App: React.FC = () => {
                 onSave={(key) => {
                     saveManualApiKey(key);
                     setIsApiKeyModalOpen(false);
-                    // Retry mechanism: User will likely have to click "Add to Queue" again or delete/retry failed card
                     alert("Key saved! Please try grading the card again.");
                 }}
                 onClose={() => setIsApiKeyModalOpen(false)}
