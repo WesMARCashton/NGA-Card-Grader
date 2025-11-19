@@ -11,7 +11,8 @@ import {
   identifyCard,
   gradeCardPreliminary,
   generateCardSummary,
-  saveManualApiKey
+  saveManualApiKey,
+  getCardMarketValue
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
 import { syncToSheet } from './services/sheetsService';
@@ -78,7 +79,7 @@ const App: React.FC = () => {
           if (savedCards.length > 0) {
             // Check for "Stuck" cards (cards that were processing when app crashed)
             const recoveredCards = savedCards.map(c => {
-              if (['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status)) {
+              if (['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status)) {
                 return { 
                   ...c, 
                   status: 'grading_failed' as const, 
@@ -184,7 +185,8 @@ const App: React.FC = () => {
                       gradeName: safeString(card.gradeName),
                       
                       overallGrade: safeGrade,
-                      details: card.details // Deep object, accepted as is (optional chaining in UI handles safety)
+                      details: card.details, // Deep object, accepted as is (optional chaining in UI handles safety)
+                      marketValue: card.marketValue // Accept market value object if present
                   };
                   
                   validCards.push(cleanCard);
@@ -289,6 +291,12 @@ const App: React.FC = () => {
           finalStatus = 'reviewed'; // Manual grades are accepted automatically
           break;
         
+        case 'fetching_value':
+            const marketData = await getCardMarketValue(cardToProcess);
+            finalCardData = { marketValue: marketData };
+            finalStatus = 'reviewed';
+            break;
+
         default:
           processingCards.current.delete(cardToProcess.id);
           return;
@@ -361,7 +369,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const cardsInQueue = cards.filter(c => 
-        ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status) &&
+        ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status) &&
         !processingCards.current.has(c.id)
     );
     
@@ -402,6 +410,14 @@ const App: React.FC = () => {
         );
         saveCollectionToDrive(updatedCards);
         return updatedCards;
+      });
+  }, [saveCollectionToDrive]);
+
+  const handleGetMarketValue = useCallback((card: CardData) => {
+      setCards(currentCards => {
+          const updatedCards = currentCards.map(c => c.id === card.id ? { ...c, status: 'fetching_value' as const } : c);
+          saveCollectionToDrive(updatedCards);
+          return updatedCards;
       });
   }, [saveCollectionToDrive]);
 
@@ -540,7 +556,8 @@ const App: React.FC = () => {
                   rewriteStatusMessage={rewriteStatusMessage}
                   onAcceptGrade={handleAcceptGrade}
                   onManualGrade={handleManualGrade}
-                  onLoadCollection={() => handleSyncWithDrive(false)} // Manual load prop
+                  onLoadCollection={() => handleSyncWithDrive(false)} 
+                  onGetMarketValue={handleGetMarketValue}
                 />;
       case 'scanner':
       default:

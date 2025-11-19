@@ -27,7 +27,17 @@ export interface EvaluationDetails {
   printQuality: SubGradeDetail;
 }
 
-export type CardStatus = 'grading' | 'needs_review' | 'reviewed' | 'grading_failed' | 'challenging' | 'regenerating_summary' | 'generating_summary';
+export interface MarketValue {
+    averagePrice: number;
+    minPrice: number;
+    maxPrice: number;
+    currency: string;
+    lastSoldDate?: string;
+    sourceUrls: { title: string; uri: string }[];
+    notes?: string;
+}
+
+export type CardStatus = 'grading' | 'needs_review' | 'reviewed' | 'grading_failed' | 'challenging' | 'regenerating_summary' | 'generating_summary' | 'fetching_value';
 
 export interface CardData {
   id:string;
@@ -50,6 +60,8 @@ export interface CardData {
   
   details?: EvaluationDetails;
   summary?: string;
+  
+  marketValue?: MarketValue; // Added market value field
   
   timestamp: number;
   gradingSystem: 'NGA';

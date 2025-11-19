@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { CardData } from '../types';
 import { GradeDisplay, EvaluationRow } from './GradeDisplays';
 import { ImageLightbox } from './ImageLightbox';
-import { GavelIcon, ArrowUpIcon, ArrowDownIcon, SpinnerIcon, CheckIcon, TrashIcon, EditIcon, ResyncIcon } from './icons';
+import { GavelIcon, ArrowUpIcon, ArrowDownIcon, SpinnerIcon, CheckIcon, TrashIcon, EditIcon, ResyncIcon, CurrencyIcon, LinkIcon } from './icons';
 import { ensureDataUrl } from '../utils/fileUtils';
 import { ManualGradeModal } from './ManualGradeModal';
 
@@ -15,7 +15,8 @@ interface CardDetailModalProps {
   onAcceptGrade: (cardId: string) => void;
   onDelete: (cardId: string) => void;
   onManualGrade: (card: CardData, grade: number, gradeName: string) => void;
-  onRetryGrading?: (card: CardData) => void; // Make optional
+  onRetryGrading?: (card: CardData) => void; 
+  onGetMarketValue?: (card: CardData) => void; // New prop
 }
 
 const InfoPill: React.FC<{ label: string, value?: string }> = ({ label, value }) => (
@@ -25,7 +26,7 @@ const InfoPill: React.FC<{ label: string, value?: string }> = ({ label, value })
   </div>
 );
 
-export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose, onChallengeGrade, onAcceptGrade, onDelete, onManualGrade, onRetryGrading }) => {
+export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose, onChallengeGrade, onAcceptGrade, onDelete, onManualGrade, onRetryGrading, onGetMarketValue }) => {
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const [isChallenging, setIsChallenging] = useState(false);
   const [isManualEntry, setIsManualEntry] = useState(false);
@@ -50,6 +51,13 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
   const handleRetry = () => {
       if (onRetryGrading) {
           onRetryGrading(card);
+          onClose();
+      }
+  }
+
+  const handleGetValue = () => {
+      if (onGetMarketValue) {
+          onGetMarketValue(card);
           onClose();
       }
   }
@@ -158,6 +166,48 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
                       <div className="text-center p-4 text-slate-500">Not Graded</div>
                     )}
                 </div>
+
+                {/* Market Value Section */}
+                {card.status === 'reviewed' && (
+                    <div className="w-full p-4 bg-green-50 border border-green-100 rounded-lg">
+                         <h4 className="text-sm font-semibold uppercase tracking-wider text-green-800 text-center mb-3 flex items-center justify-center gap-2">
+                             <CurrencyIcon className="w-4 h-4" /> Market Value
+                         </h4>
+                         {card.marketValue ? (
+                            <div className="text-center space-y-2">
+                                <p className="text-3xl font-bold text-green-700">
+                                    {card.marketValue.currency === 'USD' ? '$' : ''}{card.marketValue.averagePrice.toFixed(2)}
+                                </p>
+                                <p className="text-xs text-green-600">
+                                    Range: {card.marketValue.minPrice} - {card.marketValue.maxPrice}
+                                </p>
+                                <p className="text-xs text-slate-500 italic">{card.marketValue.notes}</p>
+                                {card.marketValue.sourceUrls.length > 0 && (
+                                    <div className="pt-2 mt-2 border-t border-green-100">
+                                        <p className="text-xs font-semibold text-slate-500 mb-1">Sold Listings Found:</p>
+                                        <div className="flex flex-wrap gap-2 justify-center">
+                                            {card.marketValue.sourceUrls.slice(0, 3).map((url, idx) => (
+                                                <a key={idx} href={url.uri} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                                                    <LinkIcon className="w-3 h-3" /> Source {idx + 1}
+                                                </a>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                         ) : (
+                             <div className="text-center">
+                                 <button 
+                                    onClick={handleGetValue}
+                                    className="text-sm bg-green-600 text-white py-2 px-4 rounded-full hover:bg-green-700 transition shadow-sm font-semibold"
+                                 >
+                                     Find Estimated Value
+                                 </button>
+                                 <p className="text-xs text-slate-500 mt-2">Checks recent sold listings on the web.</p>
+                             </div>
+                         )}
+                    </div>
+                )}
             </div>
 
             <div className="lg:col-span-2 space-y-6">

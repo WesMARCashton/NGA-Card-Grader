@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
-import { CardData, EvaluationDetails } from "../types";
+import { CardData, EvaluationDetails, MarketValue } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
 
 // Helper function to extract a JSON object from a string, which might be wrapped in markdown.
@@ -24,6 +25,9 @@ const extractJson = (text: string): any => {
         return JSON.parse(text);
     } catch (e) {
         console.error("Failed to parse the entire response as JSON:", e);
+        // Instead of throwing immediately, try to see if it's just text
+        // If it is just text, we might return it as a raw object if that's expected, 
+        // but for our specific functions, we usually expect JSON.
         throw new Error("AI response was not in the expected JSON format.");
     }
 }
@@ -632,14 +636,7 @@ export const regenerateCardAnalysisForGrade = async (
 
     if (!response.text) {
         console.error("Gemini response was blocked or empty in regenerateCardAnalysisForGrade.", response);
-        const finishReason = response.candidates?.[0]?.finishReason;
-        let message = "The AI's response for analysis regeneration was empty. This can happen due to content policy violations or other restrictions.";
-        if (finishReason === 'SAFETY') {
-            message = "The AI's response was blocked for safety reasons during analysis regeneration.";
-        } else if (finishReason) {
-            message = `The AI's response was incomplete during analysis regeneration due to: ${finishReason}.`;
-        }
-        throw new Error(message);
+        throw new Error("AI returned an empty response.");
     }
     
     onStatusUpdate('Finalizing analysis report...');
@@ -647,5 +644,90 @@ export const regenerateCardAnalysisForGrade = async (
     return {
         details: result.details,
         summary: result.summary,
+    };
+};
+
+
+// --- MARKET VALUE ESTIMATION ---
+export const getCardMarketValue = async (
+    card: CardData
+): Promise<MarketValue> => {
+    const ai = getAIClient();
+    
+    const gradeSearchTerm = card.gradeName ? `Grade ${card.overallGrade} ${card.gradeName}` : `Grade ${card.overallGrade}`;
+    const cardSearchTerm = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} ${card.edition} ${gradeSearchTerm}`;
+
+    const prompt = `
+      **Task:** Find recent sold prices for a sports card to estimate its current market value.
+      
+      **Card Details:**
+      - Search Query: "${cardSearchTerm}"
+      - Specific Grade: ${card.overallGrade} (Look for comparisons like PSA ${card.overallGrade}, BGS ${card.overallGrade}, or Raw if low grade)
+      
+      **Instructions:**
+      1. Use Google Search to find **recently sold** listings (eBay sold, 130point, Goldin, etc.) for this EXACT card in a similar grade.
+      2. Ignore "Active" listings (asking prices are not value). Focus on "Sold" or "Completed" items.
+      3. If exact grade matches are rare, you may use slightly adjacent grades (e.g. use PSA 9 to estimate a raw 10, or vice versa) but note this.
+      4. Calculate the min, max, and average sold price based on the findings.
+      
+      **Output Format:**
+      Return a JSON object strictly matching the following structure. 
+      
+      \`\`\`json
+      {
+        "averagePrice": number,
+        "minPrice": number,
+        "maxPrice": number,
+        "currency": "USD",
+        "lastSoldDate": "YYYY-MM-DD" (or "Unknown"),
+        "notes": "Brief text explaining the estimate (e.g. 'Based on 3 recent eBay sales of PSA 9 copies')."
+      }
+      \`\`\`
+    `;
+
+    // Note: When using tools: googleSearch, we CANNOT use responseMimeType: 'application/json'.
+    // We must rely on the model to output the JSON string in the text.
+    const response = await withRetry<GenerateContentResponse>(
+        () => ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [{ text: prompt }] },
+            config: {
+                tools: [{ googleSearch: {} }], 
+                temperature: 0.1,
+            }
+        }),
+        'getting market value'
+    );
+
+    const jsonText = response.text || "{}";
+    let marketData: any = {};
+    
+    try {
+        marketData = extractJson(jsonText);
+    } catch (e) {
+        console.error("Failed to parse market value JSON", e);
+        throw new Error("Could not parse market value data from AI.");
+    }
+
+    // Extract grounding metadata (URLs)
+    const sourceUrls: { title: string; uri: string }[] = [];
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+    
+    if (chunks) {
+        chunks.forEach((chunk: any) => {
+            if (chunk.web?.uri && chunk.web?.title) {
+                sourceUrls.push({ title: chunk.web.title, uri: chunk.web.uri });
+            }
+        });
+    }
+
+    return {
+        averagePrice: typeof marketData.averagePrice === 'number' ? marketData.averagePrice : 0,
+        minPrice: typeof marketData.minPrice === 'number' ? marketData.minPrice : 0,
+        maxPrice: typeof marketData.maxPrice === 'number' ? marketData.maxPrice : 0,
+        currency: marketData.currency || 'USD',
+        lastSoldDate: marketData.lastSoldDate,
+        notes: marketData.notes,
+        sourceUrls: sourceUrls
     };
 };

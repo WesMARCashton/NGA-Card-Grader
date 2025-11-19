@@ -15,7 +15,7 @@ interface CardHistoryProps {
   onCardsSynced: (syncedCards: CardData[]) => void;
   onChallengeGrade: (card: CardData, direction: 'higher' | 'lower') => void;
   onResync: (card: CardData) => Promise<void>;
-  onRetryGrading: (card: CardData) => void; // Added new prop
+  onRetryGrading: (card: CardData) => void; 
   onRewriteAllAnalyses: () => Promise<void>;
   resetRewriteState: () => void;
   isRewriting: boolean;
@@ -25,7 +25,8 @@ interface CardHistoryProps {
   rewriteStatusMessage: string;
   onAcceptGrade: (cardId: string) => void;
   onManualGrade: (card: CardData, grade: number, gradeName: string) => void;
-  onLoadCollection?: () => void; 
+  onLoadCollection?: () => void;
+  onGetMarketValue: (card: CardData) => void; 
 }
 
 type ResyncState = 'idle' | 'syncing' | 'success';
@@ -61,6 +62,8 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
             return <div className="flex items-center gap-2 text-purple-600"><SpinnerIcon className="w-5 h-5" /> <span className="text-sm font-semibold">Rewriting...</span></div>;
         case 'generating_summary':
              return <div className="flex items-center gap-2 text-blue-600"><SpinnerIcon className="w-5 h-5" /> <span className="text-sm font-semibold">Writing Report...</span></div>;
+        case 'fetching_value':
+            return <div className="flex items-center gap-2 text-green-600"><SpinnerIcon className="w-5 h-5" /> <span className="text-sm font-semibold">Finding Value...</span></div>;
         case 'grading_failed':
             return <div className="text-sm font-semibold text-red-600">Failed</div>;
         case 'needs_review':
@@ -70,7 +73,7 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
     }
   };
 
-  const isProcessing = ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(card.status);
+  const isProcessing = ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(card.status);
 
   return (
     <div 
@@ -133,7 +136,7 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
 export const CardHistory: React.FC<CardHistoryProps> = ({ 
     cards, onBack, onDelete, getAccessToken, onCardsSynced, onChallengeGrade, onResync, onRetryGrading,
     onRewriteAllAnalyses, resetRewriteState, isRewriting, rewriteProgress, rewrittenCount, 
-    rewriteFailCount, rewriteStatusMessage, onAcceptGrade, onManualGrade, onLoadCollection
+    rewriteFailCount, rewriteStatusMessage, onAcceptGrade, onManualGrade, onLoadCollection, onGetMarketValue
 }) => {
   const [selectedCard, setSelectedCard] = useState<CardData | null>(null);
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
@@ -156,7 +159,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
   }
   
   const needsReviewCards = cards.filter(c => c.status === 'needs_review' || c.status === 'grading_failed').sort((a,b) => b.timestamp - a.timestamp);
-  const processingQueueCards = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status)).sort((a,b) => b.timestamp - a.timestamp);
+  const processingQueueCards = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status)).sort((a,b) => b.timestamp - a.timestamp);
   const collectionCards = cards.filter(c => c.status === 'reviewed');
   const cardsToSync = collectionCards.filter(card => !card.isSynced).sort((a,b) => b.timestamp - a.timestamp);
   const syncedCards = collectionCards.filter(card => card.isSynced).sort((a,b) => b.timestamp - a.timestamp);
@@ -164,10 +167,12 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
   const exportToCsv = () => {
     const cardsToExport = cards.filter(c => c.status === 'reviewed' || c.status === 'needs_review');
     if (cardsToExport.length === 0) return;
-    const headers = ['ID', 'Year', 'Company', 'Set', 'Name', 'Edition', 'Card Number', 'Grade Name', 'Grade', 'Status'];
+    const headers = ['ID', 'Year', 'Company', 'Set', 'Name', 'Edition', 'Card Number', 'Grade Name', 'Grade', 'Estimated Value', 'Status'];
     const rows = cardsToExport.map(card => [
       card.id, card.year, card.company, card.company === card.set ? '' : card.set,
-      card.name, card.edition, `"#${card.cardNumber}"`, card.gradeName, card.overallGrade, card.status
+      card.name, card.edition, `"#${card.cardNumber}"`, card.gradeName, card.overallGrade, 
+      card.marketValue ? `${card.marketValue.currency} ${card.marketValue.averagePrice}` : 'N/A',
+      card.status
     ].join(','));
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -306,7 +311,8 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
           onAcceptGrade={onAcceptGrade}
           onDelete={onDelete}
           onManualGrade={onManualGrade}
-          onRetryGrading={onRetryGrading} // Pass to modal
+          onRetryGrading={onRetryGrading}
+          onGetMarketValue={onGetMarketValue} 
         />
       )}
       {isSheetModalOpen && (
