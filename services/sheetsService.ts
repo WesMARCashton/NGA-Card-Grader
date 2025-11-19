@@ -39,7 +39,12 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
 
     // 2. Format the new card data into rows
     const newRows = cardsToSync.sort((a,b) => a.timestamp - b.timestamp).map(card => {
-        const set = card.company.toUpperCase() === card.set.toUpperCase() ? '' : card.set;
+        // Safely handle potentially undefined strings
+        const companyStr = (card.company || '').toString();
+        const setStr = (card.set || '').toString();
+
+        // Only hide the set name if it exactly matches the company name (e.g. Topps Topps)
+        const set = companyStr.toUpperCase() === setStr.toUpperCase() ? '' : setStr;
         const cardNumber = card.cardNumber ? `#${card.cardNumber}` : '';
         
         const stringValues = [
