@@ -126,21 +126,31 @@ const App: React.FC = () => {
       const { fileId, cards: loadedCards } = await getCollection(token);
       
       // ** ROBUST DATA SANITIZATION **
-      // Filter out completely corrupt entries and ensure required fields exist
-      // This prevents the "White Screen" crash if old data is missing images or IDs
-      const validCards = loadedCards.filter(c => c && typeof c === 'object').map(card => {
-          const safeId = card.id || generateId();
-          const safeStatus = card.status || 'reviewed';
+      // Filter out completely corrupt entries and ensure required fields exist with CORRECT TYPES
+      // This prevents the "White Screen" crash if old data is missing images or IDs, or if numbers are strings
+      const validCards = loadedCards.filter((c: any) => c && typeof c === 'object').map((card: any) => {
+          // Safety checks for type consistency
+          const safeId = (typeof card.id === 'string' && card.id) ? card.id : generateId();
+          const safeStatus = (typeof card.status === 'string' && card.status) ? card.status : 'reviewed';
+          
           // Ensure images are strings (even if empty)
-          const safeFront = card.frontImage || '';
-          const safeBack = card.backImage || '';
+          const safeFront = (typeof card.frontImage === 'string') ? card.frontImage : '';
+          const safeBack = (typeof card.backImage === 'string') ? card.backImage : '';
+          
+          // Ensure grade is a number if present
+          let safeGrade = card.overallGrade;
+          if (safeGrade !== undefined && typeof safeGrade !== 'number') {
+              safeGrade = parseFloat(safeGrade);
+              if (isNaN(safeGrade)) safeGrade = undefined;
+          }
 
           return { 
               ...card, 
               id: safeId,
               status: safeStatus as CardData['status'], 
               frontImage: safeFront,
-              backImage: safeBack
+              backImage: safeBack,
+              overallGrade: safeGrade
           };
       });
 
@@ -149,8 +159,11 @@ const App: React.FC = () => {
       setSyncStatus('success');
 
       if (!silent) {
-          alert(`Sync Complete! Found ${validCards.length} cards in your collection.`);
-          setView('history'); // Auto-navigate to history so user sees the cards immediately
+          // Use setTimeout to ensure state update has processed before showing alert/navigating
+          setTimeout(() => {
+            alert(`Sync Complete! Found ${validCards.length} cards in your collection.`);
+            setView('history'); // Auto-navigate to history so user sees the cards immediately
+          }, 100);
       }
 
     } catch (err: any) {
