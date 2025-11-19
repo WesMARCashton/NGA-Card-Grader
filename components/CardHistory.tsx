@@ -59,6 +59,8 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
             return <div className="flex items-center gap-2 text-yellow-600"><SpinnerIcon className="w-5 h-5" /> <span className="text-sm font-semibold">Challenging...</span></div>;
         case 'regenerating_summary':
             return <div className="flex items-center gap-2 text-purple-600"><SpinnerIcon className="w-5 h-5" /> <span className="text-sm font-semibold">Rewriting...</span></div>;
+        case 'generating_summary':
+             return <div className="flex items-center gap-2 text-blue-600"><SpinnerIcon className="w-5 h-5" /> <span className="text-sm font-semibold">Writing Report...</span></div>;
         case 'grading_failed':
             return <div className="text-sm font-semibold text-red-600">Failed</div>;
         case 'needs_review':
@@ -68,7 +70,7 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
     }
   };
 
-  const isProcessing = ['grading', 'challenging', 'regenerating_summary'].includes(card.status);
+  const isProcessing = ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(card.status);
 
   return (
     <div 
@@ -154,7 +156,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
   }
   
   const needsReviewCards = cards.filter(c => c.status === 'needs_review' || c.status === 'grading_failed').sort((a,b) => b.timestamp - a.timestamp);
-  const processingQueueCards = cards.filter(c => ['grading', 'challenging', 'regenerating_summary'].includes(c.status)).sort((a,b) => b.timestamp - a.timestamp);
+  const processingQueueCards = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status)).sort((a,b) => b.timestamp - a.timestamp);
   const collectionCards = cards.filter(c => c.status === 'reviewed');
   const cardsToSync = collectionCards.filter(card => !card.isSynced).sort((a,b) => b.timestamp - a.timestamp);
   const syncedCards = collectionCards.filter(card => card.isSynced).sort((a,b) => b.timestamp - a.timestamp);

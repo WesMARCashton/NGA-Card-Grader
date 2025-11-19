@@ -9,7 +9,8 @@ import {
   challengeGrade, 
   regenerateCardAnalysisForGrade,
   identifyCard,
-  gradeAndSummarizeCard,
+  gradeCardPreliminary,
+  generateCardSummary,
   saveManualApiKey
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
@@ -71,7 +72,7 @@ const App: React.FC = () => {
           if (savedCards.length > 0) {
             // Check for "Stuck" cards (cards that were processing when app crashed)
             const recoveredCards = savedCards.map(c => {
-              if (['grading', 'challenging', 'regenerating_summary'].includes(c.status)) {
+              if (['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status)) {
                 return { 
                   ...c, 
                   status: 'grading_failed' as const, 
@@ -82,10 +83,9 @@ const App: React.FC = () => {
             });
 
             // Only restore if we don't have cards yet (e.g., initial load)
-            // This acts as a cache-first strategy
+            // This acts as a cache-first strategy to ensure we don't lose unsynced work
             setCards(current => {
               if (current.length === 0) {
-                console.log(`Restored ${recoveredCards.length} cards from local backup.`);
                 return recoveredCards;
               }
               return current;
@@ -96,9 +96,7 @@ const App: React.FC = () => {
         }
       }
     } else {
-      // Clear state on logout, but we might want to keep backup in localStorage just in case? 
-      // For security/privacy, let's NOT clear localStorage backup automatically on simple refresh, 
-      // but strictly on logout we usually clear user data.
+      // Clear state on logout
       setCards([]);
       setDriveFileId(null);
       setSyncStatus('idle');
@@ -207,18 +205,28 @@ const App: React.FC = () => {
 
       switch (cardToProcess.status) {
         case 'grading':
+          // Stage 1: ID and Preliminary Grade (Numbers Only)
           const identifyPromise = identifyCard(frontImageBase64, backImageBase64);
-          const gradePromise = gradeAndSummarizeCard(frontImageBase64, backImageBase64);
+          const gradePromise = gradeCardPreliminary(frontImageBase64, backImageBase64);
           const [cardIdentification, gradeData] = await Promise.all([identifyPromise, gradePromise]);
           finalCardData = { ...cardIdentification, ...gradeData };
+          break;
+        
+        case 'generating_summary':
+          // Stage 2: Generate Summary for accepted card
+          const summary = await generateCardSummary(frontImageBase64, backImageBase64, cardToProcess);
+          finalCardData = { summary };
+          finalStatus = 'reviewed';
           break;
 
         case 'challenging':
           const challengedResult = await challengeGrade(cardToProcess, cardToProcess.challengeDirection!, () => {});
           finalCardData = { ...challengedResult, challengeDirection: undefined };
+          finalStatus = 'needs_review'; // Still needs review after challenge
           break;
 
         case 'regenerating_summary':
+          // This is used for manual edits where we need to rewrite the logic to match the new grade
           const regeneratedData = await regenerateCardAnalysisForGrade(
             frontImageBase64, backImageBase64,
             { name: cardToProcess.name!, team: cardToProcess.team!, set: cardToProcess.set!, edition: cardToProcess.edition!, cardNumber: cardToProcess.cardNumber!, company: cardToProcess.company!, year: cardToProcess.year! },
@@ -300,7 +308,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const cardsInQueue = cards.filter(c => 
-        ['grading', 'challenging', 'regenerating_summary'].includes(c.status) &&
+        ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status) &&
         !processingCards.current.has(c.id)
     );
     
@@ -326,7 +334,8 @@ const App: React.FC = () => {
 
   const handleAcceptGrade = useCallback(async (cardId: string) => {
       setCards(currentCards => {
-          const updatedCards = currentCards.map(c => c.id === cardId ? { ...c, status: 'reviewed' as const } : c);
+          // Transition to 'generating_summary' instead of 'reviewed' immediately
+          const updatedCards = currentCards.map(c => c.id === cardId ? { ...c, status: 'generating_summary' as const } : c);
           saveCollectionToDrive(updatedCards);
           return updatedCards;
       });

@@ -27,7 +27,7 @@ export interface EvaluationDetails {
   printQuality: SubGradeDetail;
 }
 
-export type CardStatus = 'grading' | 'needs_review' | 'reviewed' | 'grading_failed' | 'challenging' | 'regenerating_summary';
+export type CardStatus = 'grading' | 'needs_review' | 'reviewed' | 'grading_failed' | 'challenging' | 'regenerating_summary' | 'generating_summary';
 
 export interface CardData {
   id:string;

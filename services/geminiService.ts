@@ -294,18 +294,19 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 };
 
 
-// STEP 2 & 3 Combined: Grade the card's condition, calculate final grade, and write summary
-export const gradeAndSummarizeCard = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string, summary: string }> => {
+// STEP 2: Preliminary Grading (Numbers Only)
+// This splits the workload: We get the numbers fast, and accurate, without the text generation overhead.
+export const gradeCardPreliminary = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string }> => {
     const ai = getAIClient();
     const prompt = `
-      **Task:** Perform a complete NGA grading analysis of the provided card images.
+      **Task:** Perform a STRICT NGA grading analysis.
       ${NGA_GRADING_GUIDE}
       **Instructions:**
-      1.  **Condition Analysis:** For each of the five categories (Centering, Corners, Edges, Surface, Print Quality), assign a whole number subgrade (1-10) and provide brief notes explaining your reasoning, referencing the guide.
-      2.  **Final Calculation:** Follow **STEP 6** of the NGA guide precisely to calculate the final \`overallGrade\`.
-      3.  **Determine Grade Name:** Use the final grade to determine the correct \`gradeName\` from the provided mapping.
-      4.  **Write Summary:** Write a brief, expert 'summary' of the card's condition based on the subgrades.
-      **Output:** Return a single raw JSON object.
+      1.  **Condition Analysis:** Assign whole number subgrades (1-10) for Centering, Corners, Edges, Surface, Print Quality.
+      2.  **Notes:** Provide very brief, technical bullet points for each subgrade explaining flaws (e.g., "Soft top-right corner", "60/40 centering").
+      3.  **Final Calculation:** Calculate \`overallGrade\` strictly using Step 6 of the guide.
+      4.  **Determine Grade Name:** Use the mapping provided.
+      **Output:** Return a single raw JSON object. DO NOT include a summary.
       **JSON Schema:**
       {
         "details": {
@@ -316,8 +317,7 @@ export const gradeAndSummarizeCard = async (frontImageBase64: string, backImageB
           "printQuality": { "grade": number, "notes": string }
         },
         "overallGrade": number,
-        "gradeName": string,
-        "summary": string
+        "gradeName": string
       }
     `;
 
@@ -341,11 +341,9 @@ export const gradeAndSummarizeCard = async (frontImageBase64: string, backImageB
         },
         overallGrade: { type: Type.INTEGER },
         gradeName: { type: Type.STRING },
-        summary: { type: Type.STRING },
       },
-      required: ['details', 'overallGrade', 'gradeName', 'summary'],
+      required: ['details', 'overallGrade', 'gradeName'],
     };
-
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
@@ -356,14 +354,67 @@ export const gradeAndSummarizeCard = async (frontImageBase64: string, backImageB
                 { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
             ]},
              config: {
-               temperature: 0.1,
+               temperature: 0.0, // Zero temperature for maximum mathematical consistency
                responseMimeType: "application/json",
                responseSchema,
              }
         }),
-        'grading card condition'
+        'grading card preliminary'
     );
     return extractJson(response.text);
+};
+
+// STEP 3: Generate Summary (Post-Acceptance)
+// This runs in the background after the user accepts the grade.
+export const generateCardSummary = async (
+    frontImageBase64: string, 
+    backImageBase64: string, 
+    cardData: Partial<CardData>
+): Promise<string> => {
+    const ai = getAIClient();
+    const prompt = `
+      **Task:** Write a professional NGA grading summary for this card.
+      **Card:** ${cardData.year} ${cardData.company} ${cardData.name} #${cardData.cardNumber}
+      **Grade:** ${cardData.overallGrade} (${cardData.gradeName})
+      **Subgrades:** ${JSON.stringify(cardData.details)}
+      
+      **Instructions:**
+      Write a concise, expert summary (2-3 sentences) that justifies the overall grade based on the provided subgrades and the visible condition in the images. Mention key flaws or highlights.
+      
+      **Output:** Return a single raw JSON object containing just the summary string.
+      **JSON Schema:**
+      {
+        "summary": string
+      }
+    `;
+
+    const responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+            summary: { type: Type.STRING }
+        },
+        required: ['summary']
+    };
+
+    const response = await withRetry<GenerateContentResponse>(
+        () => ai.models.generateContent({
+            model: 'gemini-2.5-flash', // Flash is fast and good enough for text generation based on existing data
+            contents: { parts: [
+                { text: prompt },
+                { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
+                { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
+            ]},
+            config: {
+                temperature: 0.7,
+                responseMimeType: "application/json",
+                responseSchema,
+            }
+        }),
+        'generating card summary'
+    );
+    
+    const result = extractJson(response.text);
+    return result.summary;
 };
 
 
