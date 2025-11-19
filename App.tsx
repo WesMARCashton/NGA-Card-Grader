@@ -58,7 +58,13 @@ const App: React.FC = () => {
   // 1. Save to Local Storage on every change
   useEffect(() => {
     if (cards.length > 0) {
-      localStorage.setItem(BACKUP_KEY, JSON.stringify(cards));
+      try {
+        localStorage.setItem(BACKUP_KEY, JSON.stringify(cards));
+      } catch (e) {
+        console.warn("Local backup failed due to storage quota (collection too large):", e);
+        // We intentionally suppress the error here to prevent the app from crashing (White Screen)
+        // if the browser's storage is full. The app will continue to work, just without local backup.
+      }
     }
   }, [cards]);
 
