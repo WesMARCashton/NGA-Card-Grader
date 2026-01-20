@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -44,7 +43,6 @@ const App: React.FC = () => {
   const [rewriteFailCount, setRewriteFailCount] = useState(0);
   const [rewriteStatusMessage, setRewriteStatusMessage] = useState('');
   
-  // States for handling the resync/sync setup flow
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [cardsToResyncManually, setCardsToResyncManually] = useState<CardData[]>([]);
 
@@ -192,7 +190,6 @@ const App: React.FC = () => {
       });
     } catch (err: any) {
       setCards(current => {
-        // Fix: Use 'as const' to ensure status literal type isn't widened to string.
         const updated = current.map(c => c.id === cardToProcess.id ? { ...c, status: 'grading_failed' as const, errorMessage: err.message } : c);
         saveCollectionToDrive(updated);
         return updated;
@@ -237,7 +234,6 @@ const App: React.FC = () => {
   const handleResyncCard = useCallback(async (card: CardData) => {
       const sheetUrl = localStorage.getItem('google_sheet_url');
       if (!sheetUrl) {
-          // If no URL, open modal with just this card
           setCardsToResyncManually([card]);
           setIsSyncModalOpen(true);
           return;
@@ -263,7 +259,7 @@ const App: React.FC = () => {
                   onChallengeGrade={(c, d) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'challenging', challengeDirection: d } : x))}
                   onResync={handleResyncCard}
                   onRetryGrading={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'grading', errorMessage: undefined } : x))}
-                  onRewriteAllAnalyses={async () => { /* Logic already in history */ }}
+                  onRewriteAllAnalyses={async () => {}}
                   resetRewriteState={() => {}}
                   isRewriting={isRewriting} rewriteProgress={rewriteProgress} rewrittenCount={rewrittenCount} rewriteFailCount={rewriteFailCount} rewriteStatusMessage={rewriteStatusMessage}
                   onAcceptGrade={handleAcceptGrade}
@@ -272,7 +268,15 @@ const App: React.FC = () => {
                   onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value' } : x))}
                 />;
       default:
-        return <CardScanner onRatingRequest={handleRatingRequest} isGrading={isGrading} gradingStatus={gradingStatus} />;
+        return <CardScanner 
+                  onRatingRequest={handleRatingRequest} 
+                  isGrading={isGrading} 
+                  gradingStatus={gradingStatus} 
+                  isLoggedIn={!!user}
+                  hasCards={cards.length > 0}
+                  onSyncDrive={() => handleSyncWithDrive(false)}
+                  isSyncing={syncStatus === 'loading'}
+               />;
     }
   };
 

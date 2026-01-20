@@ -1,20 +1,30 @@
-
-
 import React, { useState, useRef, useCallback, ChangeEvent, useEffect } from 'react';
 import { useCamera } from '../hooks/useCamera';
 import { fileToDataUrl } from '../utils/fileUtils';
-import { CameraIcon, UploadIcon, SpinnerIcon, CheckIcon } from './icons';
+import { CameraIcon, UploadIcon, SpinnerIcon, CheckIcon, ResyncIcon } from './icons';
 
 interface CardScannerProps {
   onRatingRequest: (front: string, back: string) => void;
   isGrading: boolean;
   gradingStatus?: string;
+  isLoggedIn: boolean;
+  hasCards: boolean;
+  onSyncDrive: () => void;
+  isSyncing: boolean;
 }
 
 type ScanMode = 'upload' | 'camera';
 type TargetSide = 'front' | 'back';
 
-export const CardScanner: React.FC<CardScannerProps> = ({ onRatingRequest, isGrading, gradingStatus }) => {
+export const CardScanner: React.FC<CardScannerProps> = ({ 
+  onRatingRequest, 
+  isGrading, 
+  gradingStatus, 
+  isLoggedIn, 
+  hasCards, 
+  onSyncDrive,
+  isSyncing
+}) => {
   const [frontImage, setFrontImage] = useState<string | null>(null);
   const [backImage, setBackImage] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<ScanMode>('upload');
@@ -27,7 +37,6 @@ export const CardScanner: React.FC<CardScannerProps> = ({ onRatingRequest, isGra
   const fileInputBackRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // FIX: Use ReturnType<typeof setTimeout> for browser compatibility.
     let timer: ReturnType<typeof setTimeout>;
     if (confirmation) {
       timer = setTimeout(() => {
@@ -55,10 +64,10 @@ export const CardScanner: React.FC<CardScannerProps> = ({ onRatingRequest, isGra
     if (photoDataUrl) {
       if (cameraTarget === 'front') {
         setFrontImage(photoDataUrl);
-        setCameraTarget('back'); // Automatically move to capture the back
+        setCameraTarget('back');
       } else {
         setBackImage(photoDataUrl);
-        stopCamera(); // Stop camera after capturing both
+        stopCamera();
       }
     }
   };
@@ -102,6 +111,20 @@ export const CardScanner: React.FC<CardScannerProps> = ({ onRatingRequest, isGra
 
   return (
     <div className="w-full max-w-md mx-auto p-4 md:p-6 space-y-6">
+      {isLoggedIn && !hasCards && (
+        <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl text-center space-y-3 animate-fade-in shadow-sm">
+           <p className="text-sm text-blue-800 font-medium">Your collection is empty locally.</p>
+           <button 
+              onClick={onSyncDrive}
+              disabled={isSyncing}
+              className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all shadow-md disabled:opacity-50"
+           >
+              {isSyncing ? <SpinnerIcon className="w-5 h-5" /> : <ResyncIcon className="w-5 h-5" />}
+              {isSyncing ? 'Syncing...' : 'Load from Google Drive'}
+           </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4">
         {renderImageSlot('front', frontImage, fileInputFrontRef)}
         {renderImageSlot('back', backImage, fileInputBackRef)}
