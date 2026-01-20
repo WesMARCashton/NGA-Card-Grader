@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { CardData } from '../types';
 import { ExportIcon, BackIcon, TrashIcon, GoogleSheetIcon, ResyncIcon, SpinnerIcon, CheckIcon } from './icons';
@@ -44,7 +43,7 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
       setResyncState('success');
     } catch (error) {
       console.error("Resync failed", error);
-      setResyncState('idle'); // Reset on error
+      setResyncState('idle'); 
     } finally {
       setTimeout(() => {
         setResyncState('idle');
@@ -75,7 +74,6 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
 
   const isProcessing = ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(card.status);
 
-  // Helper to format grade: shows 9.5 as "9.5" and 10 as "10" (instead of 10.0)
   const formatGrade = (grade?: number) => {
       if (grade === undefined) return '-';
       return Number.isInteger(grade) ? grade.toString() : grade.toFixed(1);
@@ -85,7 +83,7 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
     <div 
       key={card.id} 
       className={`bg-white p-4 rounded-lg flex items-center gap-4 shadow-lg transition-all duration-300 ${isProcessing ? 'opacity-70' : 'cursor-pointer hover:shadow-xl hover:scale-[1.01]'}`}
-      onClick={!isProcessing || card.status === 'grading_failed' ? onSelect : undefined} // Allow selecting failed cards
+      onClick={!isProcessing || card.status === 'grading_failed' ? onSelect : undefined}
     >
       <img src={ensureDataUrl(card.frontImage)} alt="Card front" className="w-16 h-22 object-contain rounded-md bg-slate-100"/>
       <div className="flex-grow">
@@ -154,7 +152,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
       if (updatedCard) {
         setSelectedCard(updatedCard);
       } else {
-        setSelectedCard(null); // Card was deleted, close modal
+        setSelectedCard(null);
       }
     }
   }, [cards, selectedCard]);
@@ -173,13 +171,31 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
   const exportToCsv = () => {
     const cardsToExport = cards.filter(c => c.status === 'reviewed' || c.status === 'needs_review');
     if (cardsToExport.length === 0) return;
-    const headers = ['ID', 'Year', 'Company', 'Set', 'Name', 'Edition', 'Card Number', 'Grade Name', 'Grade', 'Estimated Value', 'Status'];
-    const rows = cardsToExport.map(card => [
-      card.id, card.year, card.company, card.company === card.set ? '' : card.set,
-      card.name, card.edition, `"#${card.cardNumber}"`, card.gradeName, card.overallGrade, 
-      card.marketValue ? `${card.marketValue.currency} ${card.marketValue.averagePrice}` : 'N/A',
-      card.status
-    ].join(','));
+    const headers = [
+        'ID', 'Year', 'Company', 'Set', 'Name', 'Edition', 'Card Number', 'Grade Name', 'Overall Grade',
+        'Centering Grade', 'Centering Notes', 'Corners Grade', 'Corners Notes', 'Edges Grade', 'Edges Notes', 
+        'Surface Grade', 'Surface Notes', 'Print Quality Grade', 'Print Quality Notes', 'Summary', 'Estimated Value'
+    ];
+    
+    const rows = cardsToExport.map(card => {
+      const d = card.details;
+      const subgradeCols = [
+        d?.centering?.grade, `"${d?.centering?.notes || ''}"`,
+        d?.corners?.grade, `"${d?.corners?.notes || ''}"`,
+        d?.edges?.grade, `"${d?.edges?.notes || ''}"`,
+        d?.surface?.grade, `"${d?.surface?.notes || ''}"`,
+        d?.printQuality?.grade, `"${d?.printQuality?.notes || ''}"`,
+      ];
+
+      return [
+        card.id, card.year, card.company, card.company === card.set ? '' : card.set,
+        card.name, card.edition, `"#${card.cardNumber}"`, card.gradeName, card.overallGrade, 
+        ...subgradeCols,
+        `"${card.summary || ''}"`,
+        card.marketValue ? `${card.marketValue.currency} ${card.marketValue.averagePrice}` : 'N/A'
+      ].join(',');
+    });
+
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -190,7 +206,6 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
     document.body.removeChild(link);
   };
   
-  // Special Empty State View with Manual Sync Button
   if (cards.length === 0) {
       return (
         <div className="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6 text-center">
@@ -247,7 +262,6 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
           </div>
         </div>
 
-        {/* Newly Graded Section */}
         {needsReviewCards.length > 0 && (
             <div className="p-4 bg-green-50/50 rounded-lg space-y-4">
                 <h2 className="text-xl font-bold text-green-800">Newly Graded for Review ({needsReviewCards.length})</h2>
@@ -257,7 +271,6 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
             </div>
         )}
         
-        {/* Grading Queue Section */}
         {processingQueueCards.length > 0 && (
             <div className="p-4 bg-blue-50/50 rounded-lg space-y-4">
                 <h2 className="text-xl font-bold text-blue-800">Processing Queue ({processingQueueCards.length})</h2>
@@ -267,7 +280,6 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
             </div>
         )}
 
-        {/* Main Collection Section */}
         <div className="p-4 bg-slate-100/50 rounded-lg space-y-4">
             <h2 className="text-xl font-bold text-slate-800">Accepted Collection ({collectionCards.length})</h2>
             <div className="p-4 bg-white rounded-lg space-y-4">

@@ -1,4 +1,3 @@
-
 import { CardData } from '../types';
 
 const SHEETS_API_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
@@ -57,13 +56,25 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
             card.gradeName,
         ].map(value => (value || '').toString().toUpperCase());
 
+        // Extract subgrades safely
+        const d = card.details;
+        const subgrades = [
+            d?.centering?.grade, d?.centering?.notes,
+            d?.corners?.grade, d?.corners?.notes,
+            d?.edges?.grade, d?.edges?.notes,
+            d?.surface?.grade, d?.surface?.notes,
+            d?.printQuality?.grade, d?.printQuality?.notes,
+        ];
+
         return [
             ...stringValues,
             card.overallGrade, // Grade
+            ...subgrades,
+            card.summary || ''
         ];
     });
 
-    // 3. Append the new data to the sheet. The API automatically finds the next empty row.
+    // 3. Append the new data to the sheet.
     const appendRange = `'${firstSheetName}'`;
     const appendResponse = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED`, {
         method: 'POST',
