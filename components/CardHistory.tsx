@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { CardData } from '../types';
 import { ExportIcon, BackIcon, TrashIcon, GoogleSheetIcon, ResyncIcon, SpinnerIcon, CheckIcon, CogIcon } from './icons';
@@ -148,6 +147,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
   const [isRewriteModalOpen, setIsRewriteModalOpen] = useState(false);
   const [isSheetSettingsOpen, setIsSheetSettingsOpen] = useState(false);
+  const [hasSheetConfig, setHasSheetConfig] = useState(!!localStorage.getItem('google_sheet_url'));
 
   useEffect(() => {
     if (selectedCard) {
@@ -159,6 +159,10 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
       }
     }
   }, [cards, selectedCard]);
+
+  useEffect(() => {
+    setHasSheetConfig(!!localStorage.getItem('google_sheet_url'));
+  }, [isSheetSettingsOpen]);
 
   const handleCloseRewriteModal = () => {
     setIsRewriteModalOpen(false);
@@ -209,32 +213,6 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
     document.body.removeChild(link);
   };
   
-  if (cards.length === 0) {
-      return (
-        <div className="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6 text-center">
-             <div className="flex justify-start">
-                <button onClick={onBack} className="flex items-center gap-2 text-blue-600 hover:text-blue-500 transition">
-                    <BackIcon className="w-5 h-5" />
-                    Back to Scanner
-                </button>
-             </div>
-             
-             <div className="py-12 bg-slate-100/50 rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center gap-4">
-                <p className="text-lg font-medium text-slate-600">No cards loaded yet.</p>
-                {onLoadCollection && (
-                    <button 
-                        onClick={onLoadCollection}
-                        className="flex items-center gap-2 py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white text-lg font-bold rounded-full shadow-lg transition-transform transform hover:scale-105"
-                    >
-                        <ResyncIcon className="w-6 h-6" />
-                        Load Collection from Google Drive
-                    </button>
-                )}
-             </div>
-        </div>
-      );
-  }
-
   return (
     <>
       <div className="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6">
@@ -252,7 +230,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
                 title="Rewrite AI analysis for all cards"
             >
                 <ResyncIcon className={`h-5 w-5 ${isRewriting ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">{isRewriting ? `Rewriting...` : 'Rewrite Analyses'}</span>
+                <span className="hidden sm:inline">Rewrite Analyses</span>
             </button>
             <button
                 onClick={exportToCsv}
@@ -260,79 +238,109 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
                 className="flex items-center gap-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
                 <ExportIcon className="h-5 w-5" />
-                <span className="hidden sm:inline">Export CSV</span>
+                <span className="hidden sm:inline">CSV</span>
             </button>
           </div>
         </div>
 
-        {needsReviewCards.length > 0 && (
-            <div className="p-4 bg-green-50/50 rounded-lg space-y-4">
-                <h2 className="text-xl font-bold text-green-800">Newly Graded for Review ({needsReviewCards.length})</h2>
-                {needsReviewCards.map(card => (
-                    <CardRow key={card.id} card={card} onSelect={() => setSelectedCard(card)} onDelete={() => onDelete(card.id)} />
-                ))}
+        {/* Global Toolbar for Sheet Sync and Settings - Alway visible if cards exist */}
+        <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div className="flex items-center gap-3">
+                <div className="bg-green-100 p-2 rounded-lg">
+                    <GoogleSheetIcon className="w-6 h-6" />
+                </div>
+                <div>
+                    <p className="text-sm font-bold text-slate-800">Google Sheets Sync</p>
+                    <p className="text-xs text-slate-500">
+                        {hasSheetConfig ? "Sheet configured and ready" : "Setup required to sync data"}
+                    </p>
+                </div>
             </div>
-        )}
-        
-        {processingQueueCards.length > 0 && (
-            <div className="p-4 bg-blue-50/50 rounded-lg space-y-4">
-                <h2 className="text-xl font-bold text-blue-800">Processing Queue ({processingQueueCards.length})</h2>
-                {processingQueueCards.map(card => (
-                    <CardRow key={card.id} card={card} onSelect={() => {}} onDelete={() => onDelete(card.id)} />
-                ))}
-            </div>
-        )}
-
-        <div className="p-4 bg-slate-100/50 rounded-lg space-y-4">
-            <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold text-slate-800">Accepted Collection ({collectionCards.length})</h2>
+            <div className="flex gap-2 w-full sm:w-auto">
                 <button
                     onClick={() => setIsSheetSettingsOpen(true)}
-                    className="p-2 text-slate-500 hover:text-blue-600 rounded-full hover:bg-white transition-colors"
-                    title="Change Google Sheet"
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition"
                 >
                     <CogIcon className="w-5 h-5" />
+                    <span>Settings</span>
+                </button>
+                <button
+                    onClick={() => setIsSheetModalOpen(true)}
+                    disabled={cardsToSync.length === 0}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 py-2 px-6 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition disabled:opacity-50"
+                >
+                    <CheckIcon className="w-5 h-5" />
+                    <span>Sync ({cardsToSync.length})</span>
                 </button>
             </div>
-            
-            <div className="p-4 bg-white rounded-lg space-y-4">
-                <div className="flex justify-between items-center">
-                    <h3 className="text-lg font-bold text-slate-700">Ready to Sync ({cardsToSync.length})</h3>
-                    <button
-                        onClick={() => setIsSheetModalOpen(true)}
-                        disabled={cardsToSync.length === 0}
-                        className="flex items-center gap-2 py-2 px-4 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md transition disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <GoogleSheetIcon className="h-5 w-5" />
-                        <span>Sync to Sheet</span>
-                    </button>
-                </div>
-                {cardsToSync.length === 0 ? (
-                    <p className="text-slate-600 text-center py-4">No new cards to sync.</p>
-                ) : (
-                    cardsToSync.map(card => (
-                        <CardRow key={card.id} card={card} onSelect={() => setSelectedCard(card)} onDelete={() => onDelete(card.id)} />
-                    ))
-                )}
-            </div>
-            
-            <div className="p-4 bg-white rounded-lg space-y-4">
-                <h3 className="text-lg font-bold text-slate-700">Synced to Sheet ({syncedCards.length})</h3>
-                 {syncedCards.length === 0 ? (
-                    <p className="text-slate-600 text-center py-4">No cards have been synced yet.</p>
-                ) : (
-                    syncedCards.map(card => (
-                        <CardRow 
-                            key={card.id} 
-                            card={card} 
-                            onSelect={() => setSelectedCard(card)} 
-                            onDelete={() => onDelete(card.id)}
-                            onResync={() => onResync(card)}
-                        />
-                    ))
-                )}
-            </div>
         </div>
+
+        {cards.length === 0 ? (
+             <div className="py-12 bg-slate-100/50 rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center gap-4 text-center">
+                <p className="text-lg font-medium text-slate-600">No cards loaded yet.</p>
+                {onLoadCollection && (
+                    <button 
+                        onClick={onLoadCollection}
+                        className="flex items-center gap-2 py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white text-lg font-bold rounded-full shadow-lg transition-transform transform hover:scale-105"
+                    >
+                        <ResyncIcon className="w-6 h-6" />
+                        Load Collection from Google Drive
+                    </button>
+                )}
+             </div>
+        ) : (
+            <>
+                {needsReviewCards.length > 0 && (
+                    <div className="p-4 bg-green-50/50 rounded-lg space-y-4">
+                        <h2 className="text-xl font-bold text-green-800">Newly Graded for Review ({needsReviewCards.length})</h2>
+                        {needsReviewCards.map(card => (
+                            <CardRow key={card.id} card={card} onSelect={() => setSelectedCard(card)} onDelete={() => onDelete(card.id)} />
+                        ))}
+                    </div>
+                )}
+                
+                {processingQueueCards.length > 0 && (
+                    <div className="p-4 bg-blue-50/50 rounded-lg space-y-4">
+                        <h2 className="text-xl font-bold text-blue-800">Processing Queue ({processingQueueCards.length})</h2>
+                        {processingQueueCards.map(card => (
+                            <CardRow key={card.id} card={card} onSelect={() => {}} onDelete={() => onDelete(card.id)} />
+                        ))}
+                    </div>
+                )}
+
+                <div className="p-4 bg-slate-100/50 rounded-lg space-y-4">
+                    <h2 className="text-xl font-bold text-slate-800">Collection ({collectionCards.length})</h2>
+                    
+                    <div className="p-4 bg-white rounded-lg space-y-4">
+                        <h3 className="text-lg font-bold text-slate-700">Not yet synced ({cardsToSync.length})</h3>
+                        {cardsToSync.length === 0 ? (
+                            <p className="text-slate-500 text-sm italic py-2 text-center">All cards in your collection are synced.</p>
+                        ) : (
+                            cardsToSync.map(card => (
+                                <CardRow key={card.id} card={card} onSelect={() => setSelectedCard(card)} onDelete={() => onDelete(card.id)} />
+                            ))
+                        )}
+                    </div>
+                    
+                    <div className="p-4 bg-white rounded-lg space-y-4">
+                        <h3 className="text-lg font-bold text-slate-700">Already synced ({syncedCards.length})</h3>
+                         {syncedCards.length === 0 ? (
+                            <p className="text-slate-500 text-sm italic py-2 text-center">No cards have been synced yet.</p>
+                        ) : (
+                            syncedCards.map(card => (
+                                <CardRow 
+                                    key={card.id} 
+                                    card={card} 
+                                    onSelect={() => setSelectedCard(card)} 
+                                    onDelete={() => onDelete(card.id)}
+                                    onResync={() => onResync(card)}
+                                />
+                            ))
+                        )}
+                    </div>
+                </div>
+            </>
+        )}
       </div>
       {selectedCard && (
         <CardDetailModal 

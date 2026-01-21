@@ -47,7 +47,7 @@ const handleGeminiError = (error: any, context: string): Error => {
     }
 
     if (originalErrorMessage.toLowerCase().includes('model is overloaded')) {
-        userFriendlyMessage = "The AI model is currently busy. We are retrying, but if this persists, please try again in a few minutes.";
+        userFriendlyMessage = "The AI model is currently busy. We are retrying automatically. If this persists, the API quota might be reached.";
     } else if (error instanceof SyntaxError || originalErrorMessage.includes('JSON')) {
         userFriendlyMessage = "The AI returned an invalid response. This can be intermittent. Please try again.";
     } else if (originalErrorMessage.toLowerCase().includes('fetch')) {
@@ -65,8 +65,8 @@ const withRetry = async <T>(
   apiCall: () => Promise<T>,
   context: string,
   onRetry?: (attempt: number, delay: number) => void,
-  retries = 5,
-  initialDelay = 2000
+  retries = 10, // Increased retries
+  initialDelay = 3000 // Slightly longer initial delay
 ): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < retries; i++) {
@@ -90,10 +90,13 @@ const withRetry = async <T>(
 
       const isRetryable = originalErrorMessage.toLowerCase().includes('model is overloaded') ||
                           originalErrorMessage.toLowerCase().includes('unavailable') ||
-                          originalErrorMessage.toLowerCase().includes('deadline exceeded');
+                          originalErrorMessage.toLowerCase().includes('deadline exceeded') ||
+                          originalErrorMessage.toLowerCase().includes('too many requests') ||
+                          originalErrorMessage.includes('503');
 
       if (isRetryable && i < retries - 1) {
-        const delay = Math.min(initialDelay * Math.pow(2, i), 15000);
+        // Exponential backoff with jitter
+        const delay = Math.min(initialDelay * Math.pow(2, i) + Math.random() * 1000, 30000);
         onRetry?.(i + 1, delay);
         await new Promise(res => setTimeout(res, delay));
       } else {
@@ -194,7 +197,7 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-flash-lite-latest', // Use lite for lighter identification task
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -246,10 +249,9 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
       required: ['details', 'overallGrade', 'gradeName'],
     };
 
-    // Switched to gemini-3-flash-preview for better availability and performance
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-flash-latest', // Switched to 2.5 Flash for robustness
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -294,7 +296,7 @@ export const generateCardSummary = async (
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-flash-latest',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -359,7 +361,7 @@ export const challengeGrade = async (
     onStatusUpdate('Re-evaluating card...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-flash-latest',
             contents: { parts: [
                 { text: challengePrompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -426,7 +428,7 @@ export const regenerateCardAnalysisForGrade = async (
     onStatusUpdate('Regenerating analysis report...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-flash-latest',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -463,7 +465,7 @@ export const getCardMarketValue = async (
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-flash-latest',
             contents: { parts: [{ text: prompt }] },
             config: {
                 tools: [{ googleSearch: {} }], 
