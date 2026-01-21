@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { CardData } from '../types';
 import { syncToSheet } from '../services/sheetsService';
@@ -17,7 +18,6 @@ export const SyncSheetModal: React.FC<SyncSheetModalProps> = ({ cardsToSync, onC
     const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
     const [errorMessage, setErrorMessage] = useState('');
 
-    // Re-initialize URL from storage every time the modal mounts
     useEffect(() => {
         const savedUrl = localStorage.getItem(STORAGE_KEY);
         if (savedUrl) {
@@ -26,7 +26,8 @@ export const SyncSheetModal: React.FC<SyncSheetModalProps> = ({ cardsToSync, onC
     }, []);
 
     const handleSync = async () => {
-        if (!sheetUrl || !sheetUrl.includes('spreadsheets/d/')) {
+        const cleanUrl = sheetUrl.trim();
+        if (!cleanUrl || !cleanUrl.includes('spreadsheets/d/')) {
             setErrorMessage("Please enter a valid Google Sheet URL.");
             setStatus('error');
             return;
@@ -36,16 +37,16 @@ export const SyncSheetModal: React.FC<SyncSheetModalProps> = ({ cardsToSync, onC
         setErrorMessage('');
         
         try {
-            const token = await getAccessToken();
-            await syncToSheet(token, sheetUrl, cardsToSync);
+            // Update storage immediately so the latest URL is used by all services
+            localStorage.setItem(STORAGE_KEY, cleanUrl);
             
-            // Explicitly update storage with the URL used
-            localStorage.setItem(STORAGE_KEY, sheetUrl.trim());
+            const token = await getAccessToken();
+            // Pass the fresh URL to the service
+            await syncToSheet(token, cleanUrl, cardsToSync);
             
             onSyncSuccess(cardsToSync); 
             setStatus('success');
             
-            // Close after 2 seconds on success
             setTimeout(onClose, 2000);
         } catch (err: any) {
             console.error("Sync to sheet failed:", err);

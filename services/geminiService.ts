@@ -1,13 +1,15 @@
 
-import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { CardData, EvaluationDetails, MarketValue } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
 
 const extractJson = (response: GenerateContentResponse): any => {
     const text = response.text;
-    if (!text) {
+    if (!text || text.trim().length === 0) {
         const reason = response.candidates?.[0]?.finishReason;
-        throw new Error(`AI returned an empty response. (Reason: ${reason || 'Unknown'}). This usually happens if the content is flagged or the model is overloaded.`);
+        const safetyRatings = response.candidates?.[0]?.safetyRatings;
+        console.error("AI returned empty content. Reason:", reason, "Safety:", safetyRatings);
+        throw new Error(`AI returned an empty response (Reason: ${reason || 'Unknown'}). This usually happens if the content is flagged or the model is overloaded. Please try again with a clearer photo.`);
     }
 
     const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
@@ -15,10 +17,10 @@ const extractJson = (response: GenerateContentResponse): any => {
     const jsonString = (match && match[1]) ? match[1] : text;
 
     try {
-        return JSON.parse(jsonString);
+        return JSON.parse(jsonString.trim());
     } catch (e) {
         console.error("Failed to parse JSON from AI response:", text);
-        throw new Error("AI response was not in a valid format. Please try again.");
+        throw new Error("AI response was not in a valid format. Please try capturing the card again.");
     }
 }
 
@@ -27,7 +29,7 @@ const handleGeminiError = (error: any, context: string): Error => {
     let msg = error.message || "An unexpected error occurred.";
 
     if (msg.includes('model is overloaded') || msg.includes('busy')) {
-        return new Error("The AI model is currently busy. We are retrying, but if this persists, please try again in a few minutes.");
+        return new Error("The AI model is currently busy. Retrying... If this persists, please try again in a few minutes.");
     }
     if (msg.includes('api key') || msg.includes('401')) {
         return new Error("API_KEY_MISSING");
@@ -49,6 +51,7 @@ const withRetry = async <T>(
     } catch (error: any) {
       lastError = error;
       const msg = error.message?.toLowerCase() || '';
+      // Also retry on empty response as it's often transient
       const isRetryable = msg.includes('overloaded') || msg.includes('busy') || msg.includes('unavailable') || msg.includes('503') || msg.includes('504') || msg.includes('empty response');
 
       if (isRetryable && i < retries - 1) {
@@ -63,24 +66,35 @@ const withRetry = async <T>(
   throw handleGeminiError(lastError, context);
 };
 
+// Fix: Use exported HarmCategory and HarmBlockThreshold enums to fix type errors (Line 102)
+// Safety settings to prevent over-filtering of sports card images
+const safetySettings = [
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+];
+
 const NGA_GRADING_GUIDE = `
 --- NGA GRADING GUIDE ---
-- Centering (25%): 10=Perfect, 9=60/40.
-- Corners (25%): 10=Razor sharp, 9=One slightly soft.
-- Edges (20%): 10=Perfect, 9.5=One microscopic speck.
-- Surface (20%): 10=Flawless, 9.5=One tiny line.
-- Print Quality (10%): 10=Sharp focus.
-Final Grade: Average categories, round to nearest 0.5. Cap at 5 if creased. Cap at 6 if surface/corners < 6.
+Grading Categories:
+1. Centering (25%): Evaluation of borders. 10 is 50/50.
+2. Corners (25%): Sharpness of points. 10 is razor sharp.
+3. Edges (20%): Smoothness and color consistency. 10 is no white showing.
+4. Surface (20%): Scratches, dimples, print lines. 10 is flawless gloss.
+5. Print Quality (10%): Focus and registration.
+Rule: Final grade is the average rounded to nearest 0.5.
+Cap: Max 5 if card is creased. Max 6 if Surface/Corners < 6.
 `;
 
+// Fix: Strictly obtain the API key exclusively from process.env.API_KEY (Line 124)
 const getAIClient = () => {
-  const apiKey = localStorage.getItem('nga_manual_api_key') || process.env.API_KEY || '';
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 };
 
-export const identifyCard = async (frontImageBase64: string, backImageBase64: string): Promise<CardIdentification> => {
+export const identifyCard = async (frontImageBase64: string, backImageBase64: string): Promise<any> => {
     const ai = getAIClient();
-    const prompt = `Strictly output JSON only for this sports card identification: { "name": string, "team": string, "year": string, "set": string, "company": string, "cardNumber": string, "edition": string }. Do not include explanations.`;
+    const prompt = `Identify this sports card. Strictly output valid JSON only. JSON: { "name": string, "team": string, "year": string, "set": string, "company": string, "cardNumber": string, "edition": string }`;
     
     const responseSchema = {
       type: Type.OBJECT,
@@ -96,14 +110,16 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
       required: ['name', 'team', 'year', 'set', 'company', 'cardNumber', 'edition']
     };
 
+    // Fix: Move safetySettings out of config and update model to gemini-3-pro-preview for advanced vision tasks (Line 148)
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview', 
+            model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
                 { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
             ]},
+            safetySettings,
             config: { temperature: 0.1, responseMimeType: "application/json", responseSchema }
         }),
         'identifying card'
@@ -113,7 +129,7 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 
 export const gradeCardPreliminary = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string }> => {
     const ai = getAIClient();
-    const prompt = `Strictly perform NGA grading analysis and output JSON only. ${NGA_GRADING_GUIDE}`;
+    const prompt = `Act as a professional sports card grader. Perform a strict NGA analysis of this card. ${NGA_GRADING_GUIDE} Strictly output valid JSON only matching the requested schema.`;
 
     const subGradeSchema = {
       type: Type.OBJECT,
@@ -140,14 +156,16 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
       required: ['details', 'overallGrade', 'gradeName'],
     };
 
+    // Fix: Move safetySettings out of config and update model to gemini-3-pro-preview for complex reasoning (Line 192)
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview', 
+            model: 'gemini-3-pro-preview', 
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
                 { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
             ]},
+            safetySettings,
             config: { temperature: 0.0, responseMimeType: "application/json", responseSchema }
         }),
         'grading card'
@@ -157,9 +175,10 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
 
 export const generateCardSummary = async (frontImageBase64: string, backImageBase64: string, cardData: Partial<CardData>): Promise<string> => {
     const ai = getAIClient();
-    const prompt = `Output JSON only with a "summary" field (2-3 sentences) explaining the grade for: ${cardData.year} ${cardData.name} #${cardData.cardNumber}. Grade: ${cardData.overallGrade}. Subgrades: ${JSON.stringify(cardData.details)}`;
+    const prompt = `Explain the grade of ${cardData.overallGrade} for this ${cardData.year} ${cardData.name} sports card. Subgrades: ${JSON.stringify(cardData.details)}. Output JSON only: { "summary": string }`;
     const responseSchema = { type: Type.OBJECT, properties: { summary: { type: Type.STRING } }, required: ['summary'] };
 
+    // Fix: Move safetySettings out of config and ensure model is gemini-3-flash-preview (Line 212)
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
             model: 'gemini-3-flash-preview',
@@ -168,6 +187,7 @@ export const generateCardSummary = async (frontImageBase64: string, backImageBas
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
                 { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
             ]},
+            safetySettings,
             config: { temperature: 0.7, responseMimeType: "application/json", responseSchema }
         }),
         'summary'
@@ -177,7 +197,7 @@ export const generateCardSummary = async (frontImageBase64: string, backImageBas
 
 export const challengeGrade = async (card: CardData, direction: 'higher' | 'lower', onStatusUpdate: (status: string) => void): Promise<{ details: EvaluationDetails, summary: string, overallGrade: number, gradeName: string }> => {
     const ai = getAIClient();
-    const prompt = `Re-evaluate card as ${direction} strictly following NGA Guide. Output JSON only. Current: ${JSON.stringify(card.details)}`;
+    const prompt = `Review this card. The user challenges the initial grade as being too ${direction}. Re-evaluate strictly using NGA Guide. Output JSON only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
     const responseSchema = {
       type: Type.OBJECT,
@@ -197,14 +217,16 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
     const frontImageBase64 = dataUrlToBase64(card.frontImage);
     const backImageBase64 = dataUrlToBase64(card.backImage);
     
+    // Fix: Move safetySettings out of config and update model to gemini-3-pro-preview for advanced evaluation (Line 249)
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
                 { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
             ]},
+            safetySettings,
             config: { responseMimeType: "application/json", responseSchema }
         }), 
         'challenge'
@@ -214,7 +236,7 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
 
 export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, backImageBase64: string, cardInfo: any, targetGrade: number, targetGradeName: string, onStatusUpdate: (status: string) => void): Promise<{ details: EvaluationDetails, summary: string }> => {
     const ai = getAIClient();
-    const prompt = `Justify grade of ${targetGrade} (${targetGradeName}) with subgrades and summary. Output JSON only.`;
+    const prompt = `Justify a specific target grade of ${targetGrade} (${targetGradeName}) for this card using NGA standards. Output JSON only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
     const responseSchema = {
       type: Type.OBJECT,
@@ -229,14 +251,16 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
       required: ['details', 'summary'],
     };
 
+    // Fix: Move safetySettings out of config and update model to gemini-3-pro-preview for complex reasoning (Line 281)
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
                 { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
             ]},
+            safetySettings,
             config: { responseMimeType: "application/json", responseSchema }
         }), 
         'regenerate'
@@ -247,12 +271,14 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
 export const getCardMarketValue = async (card: CardData): Promise<MarketValue> => {
     const ai = getAIClient();
     const query = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} Grade ${card.overallGrade}`;
-    const prompt = `Find recent sold prices for: "${query}". Output JSON only: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": string }.`;
+    const prompt = `Find recent sold price data for: "${query}". Output JSON only: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": string }.`;
 
+    // Fix: Move safetySettings out of config and ensure model is gemini-3-flash-preview (Line 297)
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: { parts: [{ text: prompt }] },
+            safetySettings,
             config: { tools: [{ googleSearch: {} }], temperature: 0.1 }
         }),
         'market value'
@@ -272,13 +298,3 @@ export const getCardMarketValue = async (card: CardData): Promise<MarketValue> =
         sourceUrls
     };
 };
-
-export interface CardIdentification {
-    name: string;
-    team: string;
-    set: string;
-    edition: string;
-    cardNumber: string;
-    company: string;
-    year: string;
-}

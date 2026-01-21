@@ -89,32 +89,32 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
     const newRows = cardsToSync.sort((a,b) => a.timestamp - b.timestamp).map(card => {
         const d = card.details;
         return [
-            (card.year || '').toString(),           // A
-            (card.company || '').toUpperCase(),      // B
-            (card.team || '').toUpperCase(),         // C
-            (card.name || '').toUpperCase(),         // D
-            (card.edition || '').toUpperCase(),      // E
-            (card.set || '').toUpperCase(),          // F
-            card.cardNumber ? `#${card.cardNumber}` : '', // G
-            (card.gradeName || '').toUpperCase(),    // H
-            card.overallGrade,                       // I
-            '',                                      // J
-            '',                                      // K
-            d?.centering?.grade,                     // L
-            d?.centering?.notes,                     // M
-            d?.corners?.grade,                       // N
-            d?.corners?.notes,                       // O
-            d?.edges?.grade,                         // P
-            d?.edges?.notes,                         // Q
-            d?.surface?.grade,                       // R
-            d?.surface?.notes,                       // S
-            d?.printQuality?.grade,                  // T
-            d?.printQuality?.notes,                  // U
-            card.summary || '',                      // V
-            '',                                      // W
-            '',                                      // X
-            '',                                      // Y
-            ''                                       // Z
+            (card.year || '').toString(),                   // A
+            (card.company || '').toUpperCase(),             // B
+            (card.team || '').toUpperCase(),                // C
+            (card.name || '').toUpperCase(),                // D
+            (card.edition || '').toUpperCase(),             // E
+            (card.set || '').toUpperCase(),                 // F
+            card.cardNumber ? `#${card.cardNumber}` : '',   // G
+            (card.gradeName || '').toUpperCase(),           // H
+            card.overallGrade,                              // I
+            '',                                             // J
+            '',                                             // K
+            d?.centering?.grade,                            // L
+            d?.centering?.notes,                            // M
+            d?.corners?.grade,                              // N
+            d?.corners?.notes,                              // O
+            d?.edges?.grade,                                // P
+            d?.edges?.notes,                                // Q
+            d?.surface?.grade,                              // R
+            d?.surface?.notes,                              // S
+            d?.printQuality?.grade,                         // T
+            d?.printQuality?.notes,                         // U
+            card.summary || '',                             // V
+            '',                                             // W
+            '',                                             // X
+            '',                                             // Y
+            ''                                              // Z
         ];
     });
 
