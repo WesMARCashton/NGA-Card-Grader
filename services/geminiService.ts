@@ -2,10 +2,9 @@ import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import { CardData, EvaluationDetails, MarketValue } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
 
-// Helper function to extract a JSON object from a string, which might be wrapped in markdown.
 const extractJson = (text: string): any => {
     if (!text) {
-        throw new Error("AI returned an empty response. This may be due to content restrictions or a temporary issue.");
+        throw new Error("AI returned an empty response.");
     }
 
     const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
@@ -14,23 +13,20 @@ const extractJson = (text: string): any => {
         try {
             return JSON.parse(match[1]);
         } catch (e) {
-            console.error("Failed to parse extracted JSON:", e);
-            throw new Error("AI returned invalid JSON inside the markdown block.");
+            throw new Error("AI returned invalid JSON inside markdown.");
         }
     }
     try {
         return JSON.parse(text);
     } catch (e) {
-        console.error("Failed to parse the entire response as JSON:", e);
-        throw new Error("AI response was not in the expected JSON format.");
+        throw new Error("AI response was not in expected JSON format.");
     }
 }
 
 const handleGeminiError = (error: any, context: string): Error => {
-    console.error(`Error in ${context} with Gemini API:`, error);
+    console.error(`Error in ${context}:`, error);
     
-    let originalErrorMessage = error.message || (typeof error === 'string' ? error : `An unexpected error occurred during ${context}.`);
-    let userFriendlyMessage = `An unexpected error occurred during ${context}. Please try again.`;
+    let originalErrorMessage = error.message || (typeof error === 'string' ? error : `An unexpected error occurred.`);
 
     if (originalErrorMessage.includes('{') && originalErrorMessage.includes('}')) {
         try {
@@ -46,26 +42,22 @@ const handleGeminiError = (error: any, context: string): Error => {
     }
 
     if (originalErrorMessage.toLowerCase().includes('model is overloaded') || originalErrorMessage.toLowerCase().includes('busy')) {
-        userFriendlyMessage = "The AI model is currently busy. We are retrying automatically. If this continues, the service may be at capacity.";
-    } else if (error instanceof SyntaxError || originalErrorMessage.includes('JSON')) {
-        userFriendlyMessage = "The AI returned an invalid response. This can be intermittent. Please try again.";
-    } else if (originalErrorMessage.toLowerCase().includes('fetch') || originalErrorMessage.toLowerCase().includes('network')) {
-        userFriendlyMessage = "A network error occurred. Please check your internet connection.";
-    } else if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('401')) {
-        return new Error("API_KEY_MISSING"); 
-    } else {
-        userFriendlyMessage = `Error: ${originalErrorMessage}`;
+        return new Error("The AI model is currently busy. We are retrying, but if this persists, please try again in a few minutes.");
     }
     
-    return new Error(userFriendlyMessage);
+    if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('401')) {
+        return new Error("API_KEY_MISSING"); 
+    }
+    
+    return new Error(`Error: ${originalErrorMessage}`);
 };
 
 const withRetry = async <T>(
   apiCall: () => Promise<T>,
   context: string,
   onRetry?: (attempt: number, delay: number) => void,
-  retries = 12, 
-  initialDelay = 3000
+  retries = 15, // High retry count for stability
+  initialDelay = 4000
 ): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < retries; i++) {
@@ -83,7 +75,8 @@ const withRetry = async <T>(
                           originalErrorMessage.includes('504');
 
       if (isRetryable && i < retries - 1) {
-        const delay = Math.min(initialDelay * Math.pow(1.5, i) + Math.random() * 2000, 30000);
+        // Jittered exponential backoff
+        const delay = Math.min(initialDelay * Math.pow(1.6, i) + Math.random() * 2000, 45000);
         onRetry?.(i + 1, delay);
         await new Promise(res => setTimeout(res, delay));
       } else {
@@ -152,21 +145,14 @@ export interface CardIdentification {
     year: string;
 }
 
-const getEffectiveApiKey = () => {
-  return localStorage.getItem('nga_manual_api_key') || process.env.API_KEY || '';
-};
-
 const getAIClient = () => {
-  const apiKey = getEffectiveApiKey();
+  const apiKey = localStorage.getItem('nga_manual_api_key') || process.env.API_KEY || '';
   return new GoogleGenAI({ apiKey });
 };
 
 export const identifyCard = async (frontImageBase64: string, backImageBase64: string): Promise<CardIdentification> => {
     const ai = getAIClient();
-    const prompt = `
-      **Task:** Identify the sports card from the provided images.
-      **Output:** Return a single raw JSON object with name, team, year, set, company, cardNumber, edition.
-    `;
+    const prompt = `Identify the sports card from the images. Output JSON with fields: name, team, year, set, company, cardNumber, edition.`;
     
     const responseSchema = {
       type: Type.OBJECT,
@@ -179,6 +165,7 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
         company: { type: Type.STRING },
         year: { type: Type.STRING },
       },
+      required: ['name', 'team', 'year', 'set', 'company', 'cardNumber', 'edition']
     };
 
     const response = await withRetry<GenerateContentResponse>(
@@ -202,11 +189,7 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 
 export const gradeCardPreliminary = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string }> => {
     const ai = getAIClient();
-    const prompt = `
-      **Task:** Perform a STRICT NGA grading analysis. Support half-points (e.g., 9.5).
-      ${NGA_GRADING_GUIDE}
-      **Output:** JSON with centering, corners, edges, surface, printQuality subgrades and overallGrade.
-    `;
+    const prompt = `Perform a STRICT NGA grading analysis. Support half-points. ${NGA_GRADING_GUIDE}`;
 
     const subGradeDetailSchema = {
       type: Type.OBJECT,
@@ -257,14 +240,7 @@ export const generateCardSummary = async (
     cardData: Partial<CardData>
 ): Promise<string> => {
     const ai = getAIClient();
-    const prompt = `
-      **Task:** Write a professional NGA grading summary for this card.
-      **Card:** ${cardData.year} ${cardData.company} ${cardData.name} #${cardData.cardNumber}
-      **Grade:** ${cardData.overallGrade} (${cardData.gradeName})
-      **Subgrades:** ${JSON.stringify(cardData.details)}
-      
-      **Instructions:** Concise expert summary (2-3 sentences).
-    `;
+    const prompt = `Write a professional NGA grading summary (2-3 sentences) for: ${cardData.year} ${cardData.company} ${cardData.name} #${cardData.cardNumber}. Grade: ${cardData.overallGrade} (${cardData.gradeName}). Subgrades: ${JSON.stringify(cardData.details)}`;
 
     const responseSchema = {
         type: Type.OBJECT,
@@ -303,11 +279,7 @@ export const challengeGrade = async (
     onStatusUpdate('Initializing AI re-evaluation...');
     const ai = getAIClient();
 
-    const challengePrompt = `
-      **Task:** Re-evaluate strictly as **${direction}**.
-      ${NGA_GRADING_GUIDE}
-      **Initial Assessment:** ${JSON.stringify(card.details)}
-    `;
+    const challengePrompt = `Re-evaluate strictly as **${direction}** using NGA Guide. Initial: ${JSON.stringify(card.details)}`;
 
     const subGradeDetailSchema = {
       type: Type.OBJECT,
@@ -337,7 +309,6 @@ export const challengeGrade = async (
     const frontImageBase64 = dataUrlToBase64(card.frontImage);
     const backImageBase64 = dataUrlToBase64(card.backImage);
     
-    onStatusUpdate('Reviewing card details...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
             model: 'gemini-3-flash-preview',
@@ -354,13 +325,7 @@ export const challengeGrade = async (
         'grade challenge'
     );
 
-    const result = extractJson(response.text);
-    return {
-        details: result.details,
-        summary: result.summary,
-        overallGrade: result.overallGrade,
-        gradeName: result.gradeName,
-    };
+    return extractJson(response.text);
 };
 
 export const regenerateCardAnalysisForGrade = async (
@@ -371,13 +336,8 @@ export const regenerateCardAnalysisForGrade = async (
     targetGradeName: string,
     onStatusUpdate: (status: string) => void
 ): Promise<{ details: EvaluationDetails, summary: string }> => {
-    onStatusUpdate('Re-analyzing for new grade...');
     const ai = getAIClient();
-
-    const prompt = `
-      **Task:** Justify a grade of **${targetGrade} (${targetGradeName})**.
-      ${NGA_GRADING_GUIDE}
-    `;
+    const prompt = `Justify a grade of **${targetGrade} (${targetGradeName})** using NGA Guide.`;
 
     const subGradeDetailSchema = {
       type: Type.OBJECT,
@@ -418,25 +378,16 @@ export const regenerateCardAnalysisForGrade = async (
         'analysis regeneration'
     );
 
-    const result = extractJson(response.text);
-    return {
-        details: result.details,
-        summary: result.summary,
-    };
+    return extractJson(response.text);
 };
 
 export const getCardMarketValue = async (
     card: CardData
 ): Promise<MarketValue> => {
     const ai = getAIClient();
-    const gradeSearchTerm = card.gradeName ? `Grade ${card.overallGrade} ${card.gradeName}` : `Grade ${card.overallGrade}`;
-    const cardSearchTerm = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} ${card.edition} ${gradeSearchTerm}`;
+    const cardSearchTerm = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} Grade ${card.overallGrade}`;
 
-    const prompt = `
-      **Task:** Find recent sold prices for a sports card.
-      Query: "${cardSearchTerm}"
-      Output JSON only with averagePrice, minPrice, maxPrice, currency.
-    `;
+    const prompt = `Find recent sold prices for: "${cardSearchTerm}". Output JSON only with averagePrice, minPrice, maxPrice, currency.`;
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
@@ -450,13 +401,7 @@ export const getCardMarketValue = async (
         'getting market value'
     );
 
-    let marketData: any = {};
-    try {
-        marketData = extractJson(response.text);
-    } catch (e) {
-        throw new Error("Could not parse market data.");
-    }
-
+    const marketData = extractJson(response.text);
     const sourceUrls: { title: string; uri: string }[] = [];
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
     if (chunks) {

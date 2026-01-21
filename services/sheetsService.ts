@@ -2,15 +2,45 @@ import { CardData } from '../types';
 
 const SHEETS_API_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
 
-// Header definitions for the Google Sheet - YEAR is now in Column A (First)
+/**
+ * Column Mapping:
+ * A - Year (year)
+ * B - Company (company)
+ * C - Series (team)
+ * D - Name (name)
+ * E - Edition (edition)
+ * F - Set (set)
+ * G - Card Number (cardNumber)
+ * H - Mint (gradeName)
+ * I - Final Grade (overallGrade)
+ * J - Leave Blank
+ * K - Leave blank
+ * L - Centering Grade
+ * M - Centering Notes
+ * N - Corners Grade
+ * O - Corners Notes
+ * P - Edges Grade
+ * Q - Edges Notes
+ * R - Surface Grade
+ * S - Surface Notes
+ * T - Print Quality Grade
+ * U - Print Quality Notes
+ * V - Summary
+ * W - Leave Blank
+ * X - Leave Blank
+ * Y - Leave Blank
+ * Z - Leave Blank
+ */
 const SHEET_HEADERS = [
-    'YEAR', 'COMPANY', 'SET', 'NAME', 'EDITION', 'NUMBER', 'GRADE NAME', 'GRADE', 'ID',
+    'YEAR', 'COMPANY', 'SERIES', 'NAME', 'EDITION', 'SET', 'NUMBER', 'MINT', 'GRADE',
+    '', '', // J, K
     'CENTERING GRADE', 'CENTERING NOTES',
     'CORNERS GRADE', 'CORNERS NOTES',
     'EDGES GRADE', 'EDGES NOTES',
     'SURFACE GRADE', 'SURFACE NOTES',
     'PRINT QUALITY GRADE', 'PRINT QUALITY NOTES',
-    'SUMMARY', 'ESTIMATED VALUE', 'SOURCES'
+    'SUMMARY',
+    '', '', '', '' // W, X, Y, Z
 ];
 
 // Extracts the spreadsheet ID from a Google Sheet URL
@@ -58,49 +88,48 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
     }
 
     const newRows = cardsToSync.sort((a,b) => a.timestamp - b.timestamp).map(card => {
-        const company = (card.company || '').toString();
-        const cardSet = (card.set || '').toString();
-        const set = company.toUpperCase() === cardSet.toUpperCase() ? '' : cardSet;
-        const cardNumber = card.cardNumber ? `#${card.cardNumber}` : '';
+        const company = (card.company || '').toString().toUpperCase();
+        const series = (card.team || '').toString().toUpperCase();
+        const set = (card.set || '').toString().toUpperCase();
+        const name = (card.name || '').toString().toUpperCase();
+        const edition = (card.edition || '').toString().toUpperCase();
+        const cardNumber = card.cardNumber ? `#${card.cardNumber}`.toUpperCase() : '';
+        const gradeName = (card.gradeName || '').toString().toUpperCase();
         
-        // Match the header order exactly: 
-        // YEAR, COMPANY, SET, NAME, EDITION, NUMBER, GRADE NAME, GRADE, ID
-        const coreInfo = [
-            (card.year || '').toString(),
-            company.toUpperCase(),
-            set.toUpperCase(),
-            (card.name || '').toUpperCase(),
-            (card.edition || '').toUpperCase(),
-            cardNumber.toUpperCase(),
-            (card.gradeName || '').toUpperCase(),
-            card.overallGrade,
-            card.id
-        ];
-
-        const d = card.details;
-        const subgrades = [
-            d?.centering?.grade, d?.centering?.notes,
-            d?.corners?.grade, d?.corners?.notes,
-            d?.edges?.grade, d?.edges?.notes,
-            d?.surface?.grade, d?.surface?.notes,
-            d?.printQuality?.grade, d?.printQuality?.notes,
-        ];
-
-        const marketVal = card.marketValue ? `${card.marketValue.currency} ${card.marketValue.averagePrice}` : 'N/A';
-        const sources = card.marketValue?.sourceUrls.map(s => s.uri).join(', ') || '';
-
+        // Final Row Mapping (Columns A-Z)
         return [
-            ...coreInfo,
-            ...subgrades,
-            card.summary || '',
-            marketVal,
-            sources
+            (card.year || '').toString(), // A
+            company,                      // B
+            series,                       // C
+            name,                         // D
+            edition,                      // E
+            set,                          // F
+            cardNumber,                   // G
+            gradeName,                    // H
+            card.overallGrade,            // I
+            '',                           // J
+            '',                           // K
+            card.details?.centering?.grade,  // L
+            card.details?.centering?.notes,  // M
+            card.details?.corners?.grade,    // N
+            card.details?.corners?.notes,    // O
+            card.details?.edges?.grade,      // P
+            card.details?.edges?.notes,      // Q
+            card.details?.surface?.grade,    // R
+            card.details?.surface?.notes,    // S
+            card.details?.printQuality?.grade, // T
+            card.details?.printQuality?.notes, // U
+            card.summary || '',              // V
+            '',                              // W
+            '',                              // X
+            '',                              // Y
+            ''                               // Z
         ];
     });
 
     rowsToAppend.push(...newRows);
 
-    // 4. Append the data using the !A1 anchor
+    // 4. Append the data
     const appendRange = `'${firstSheetName}'!A1`;
     const appendResponse = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED`, {
         method: 'POST',
