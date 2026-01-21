@@ -47,7 +47,7 @@ const handleGeminiError = (error: any, context: string): Error => {
     }
 
     if (originalErrorMessage.toLowerCase().includes('model is overloaded')) {
-        userFriendlyMessage = "The AI model is currently overloaded. Please wait a moment and try again.";
+        userFriendlyMessage = "The AI model is currently busy. We are retrying, but if this persists, please try again in a few minutes.";
     } else if (error instanceof SyntaxError || originalErrorMessage.includes('JSON')) {
         userFriendlyMessage = "The AI returned an invalid response. This can be intermittent. Please try again.";
     } else if (originalErrorMessage.toLowerCase().includes('fetch')) {
@@ -65,8 +65,8 @@ const withRetry = async <T>(
   apiCall: () => Promise<T>,
   context: string,
   onRetry?: (attempt: number, delay: number) => void,
-  retries = 10,
-  initialDelay = 1000
+  retries = 5,
+  initialDelay = 2000
 ): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < retries; i++) {
@@ -89,10 +89,11 @@ const withRetry = async <T>(
       }
 
       const isRetryable = originalErrorMessage.toLowerCase().includes('model is overloaded') ||
-                          originalErrorMessage.toLowerCase().includes('unavailable');
+                          originalErrorMessage.toLowerCase().includes('unavailable') ||
+                          originalErrorMessage.toLowerCase().includes('deadline exceeded');
 
       if (isRetryable && i < retries - 1) {
-        const delay = Math.min(initialDelay * Math.pow(2, i), 30000);
+        const delay = Math.min(initialDelay * Math.pow(2, i), 15000);
         onRetry?.(i + 1, delay);
         await new Promise(res => setTimeout(res, delay));
       } else {
@@ -161,10 +162,6 @@ export interface CardIdentification {
     year: string;
 }
 
-/**
- * Returns either the manually set key from localStorage or the environment injected key.
- * This ensures the app works on custom domains where process.env.API_KEY might be empty.
- */
 const getEffectiveApiKey = () => {
   return localStorage.getItem('nga_manual_api_key') || process.env.API_KEY || '';
 };
@@ -249,9 +246,10 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
       required: ['details', 'overallGrade', 'gradeName'],
     };
 
+    // Switched to gemini-3-flash-preview for better availability and performance
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -361,7 +359,7 @@ export const challengeGrade = async (
     onStatusUpdate('Re-evaluating card...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: challengePrompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -428,7 +426,7 @@ export const regenerateCardAnalysisForGrade = async (
     onStatusUpdate('Regenerating analysis report...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },

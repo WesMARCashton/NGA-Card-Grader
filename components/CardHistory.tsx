@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { CardData } from '../types';
-import { ExportIcon, BackIcon, TrashIcon, GoogleSheetIcon, ResyncIcon, SpinnerIcon, CheckIcon } from './icons';
+import { ExportIcon, BackIcon, TrashIcon, GoogleSheetIcon, ResyncIcon, SpinnerIcon, CheckIcon, CogIcon } from './icons';
 import { CardDetailModal } from './CardDetailModal';
 import { SyncSheetModal } from './SyncSheetModal';
 import { RewriteAnalysisModal } from './RewriteAnalysisModal';
+import { SheetSettingsModal } from './SheetSettingsModal';
 import { ensureDataUrl } from '../utils/fileUtils';
 
 interface CardHistoryProps {
@@ -145,6 +147,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
   const [selectedCard, setSelectedCard] = useState<CardData | null>(null);
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
   const [isRewriteModalOpen, setIsRewriteModalOpen] = useState(false);
+  const [isSheetSettingsOpen, setIsSheetSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (selectedCard) {
@@ -249,7 +252,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
                 title="Rewrite AI analysis for all cards"
             >
                 <ResyncIcon className={`h-5 w-5 ${isRewriting ? 'animate-spin' : ''}`} />
-                <span>{isRewriting ? `Rewriting...` : 'Rewrite Analyses'}</span>
+                <span className="hidden sm:inline">{isRewriting ? `Rewriting...` : 'Rewrite Analyses'}</span>
             </button>
             <button
                 onClick={exportToCsv}
@@ -257,7 +260,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
                 className="flex items-center gap-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
                 <ExportIcon className="h-5 w-5" />
-                <span>Export CSV</span>
+                <span className="hidden sm:inline">Export CSV</span>
             </button>
           </div>
         </div>
@@ -281,7 +284,17 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
         )}
 
         <div className="p-4 bg-slate-100/50 rounded-lg space-y-4">
-            <h2 className="text-xl font-bold text-slate-800">Accepted Collection ({collectionCards.length})</h2>
+            <div className="flex justify-between items-center">
+                <h2 className="text-xl font-bold text-slate-800">Accepted Collection ({collectionCards.length})</h2>
+                <button
+                    onClick={() => setIsSheetSettingsOpen(true)}
+                    className="p-2 text-slate-500 hover:text-blue-600 rounded-full hover:bg-white transition-colors"
+                    title="Change Google Sheet"
+                >
+                    <CogIcon className="w-5 h-5" />
+                </button>
+            </div>
+            
             <div className="p-4 bg-white rounded-lg space-y-4">
                 <div className="flex justify-between items-center">
                     <h3 className="text-lg font-bold text-slate-700">Ready to Sync ({cardsToSync.length})</h3>
@@ -351,6 +364,11 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
             rewrittenCount={rewrittenCount}
             rewriteFailCount={rewriteFailCount}
             rewriteStatusMessage={rewriteStatusMessage}
+        />
+      )}
+      {isSheetSettingsOpen && (
+        <SheetSettingsModal
+            onClose={() => setIsSheetSettingsOpen(false)}
         />
       )}
     </>
