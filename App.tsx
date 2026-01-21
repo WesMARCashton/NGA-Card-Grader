@@ -15,7 +15,8 @@ import {
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
 import { syncToSheet } from './services/sheetsService';
-import { HistoryIcon, KeyIcon } from './components/icons';
+// Fix: Added SpinnerIcon to the imports from ./components/icons
+import { HistoryIcon, KeyIcon, SpinnerIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
 import { SyncSheetModal } from './components/SyncSheetModal';
 
@@ -47,29 +48,46 @@ const App: React.FC = () => {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [cardsToResyncManually, setCardsToResyncManually] = useState<CardData[]>([]);
 
-  // API Key State
+  // API Key State - initialized to null to show a blank state while checking
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
 
   const processingCards = useRef(new Set<string>());
   const CONCURRENCY_LIMIT = 2;
 
-  // Initial key check
+  // Initial key check - following "API Key Selection" instructions strictly
   useEffect(() => {
-    const checkKey = async () => {
-      if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
-        const has = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(has);
-      } else {
-        setHasApiKey(true); // Fallback for environments where key is pre-set
+    const checkApiKey = async () => {
+      try {
+        // As per instructions: "Use await window.aistudio.hasSelectedApiKey() to check"
+        // We assume it exists. If it's missing in a specific runtime, we catch and assume true.
+        if (window.aistudio) {
+          const has = await window.aistudio.hasSelectedApiKey();
+          setHasApiKey(has);
+        } else {
+          setHasApiKey(true);
+        }
+      } catch (e) {
+        console.warn("API Key selection check failed, assuming configured environment:", e);
+        setHasApiKey(true);
       }
     };
-    checkKey();
+    checkApiKey();
   }, []);
 
   const handleOpenKeySelector = async () => {
-    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
-      await window.aistudio.openSelectKey();
-      setHasApiKey(true); // Assume success after interaction
+    try {
+      // As per instructions: "add a button which calls await window.aistudio.openSelectKey()"
+      if (window.aistudio) {
+        await window.aistudio.openSelectKey();
+        // As per instructions: "you MUST assume the key selection was successful after triggering openSelectKey() and proceed to the app"
+        setHasApiKey(true);
+      } else {
+        alert("API Key selection is not available in this environment. Using default environment key.");
+        setHasApiKey(true);
+      }
+    } catch (e) {
+      console.error("Error opening key selector:", e);
+      setHasApiKey(true);
     }
   };
 
@@ -213,6 +231,7 @@ const App: React.FC = () => {
         return updated;
       });
     } catch (err: any) {
+      // As per instructions: "If the request fails with an error message containing 'Requested entity was not found.', reset the key selection state"
       if (err.message?.includes("Requested entity was not found.")) {
         setHasApiKey(false);
       }
@@ -275,6 +294,16 @@ const App: React.FC = () => {
   }, [getAccessToken]);
 
   const renderView = () => {
+    // Show a loading or splash screen while we determine if an API key is selected
+    if (hasApiKey === null) {
+        return (
+            <div className="flex flex-col items-center justify-center p-12">
+                <SpinnerIcon className="w-12 h-12 text-blue-600 mb-4" />
+                <p className="text-slate-500 font-medium">Checking application status...</p>
+            </div>
+        );
+    }
+
     if (hasApiKey === false) {
       return (
         <div className="flex flex-col items-center justify-center p-12 bg-white rounded-3xl shadow-2xl max-w-md mx-auto text-center space-y-8 animate-fade-in border border-slate-100">

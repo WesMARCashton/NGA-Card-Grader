@@ -77,22 +77,24 @@ const NGA_GRADING_STANDARDS = `
 **STRICT PROFESSIONAL GRADING ONLY**
 
 **Evaluation Categories (Subgrades)**
-- **Centering (25%):** Border alignment. 10=50/50. 9=60/40. 8=65/35.
-- **Corners (25%):** Sharpness. 10=Razor. 9.5=Hint of white. 9=Soft corner. 8=Rounded.
-- **Edges (20%):** Border uniformity. 10=Zero nicks. 9=Minor silvering.
-- **Surface (20%):** Gloss/Flaws. 10=Flawless. 9.5=One micro-line. 9=Scratch.
-- **Print Quality (10%):** Registration.
+- **Centering (25%):** Border alignment. 10=50/50. 9=60/40. 8=65/35. 
+- **Corners (25%):** Sharpness. 10=Razor Sharp (perfect). 9.5=Hint of white under 10x magnification. 9=Soft corner. 8=Rounded. 7=Dented.
+- **Edges (20%):** Border uniformity. 10=Zero nicks. 9=Minor silvering. 8=Multiple nicks.
+- **Surface (20%):** Gloss/Flaws. 10=Flawless. 9.5=One micro-line. 9=Scratch or print line. 8=Pitting or stain.
+- **Print Quality (10%):** Focus and Registration.
 
 **LOGIC RULES:**
-- If Average ends in .25, round DOWN.
+- If Average ends in .25, round DOWN to .0.
 - If Average ends in .75, round DOWN to .5.
-- **CREASE PENALTY:** Any crease caps card at 5.0.
-- **LOW QUALITY PENALTY:** Surface/Corners < 6.0 caps overall at 6.0.
+- **CREASE PENALTY:** Any crease (even microscopic) caps card at 5.0.
+- **LOW QUALITY PENALTY:** If any subgrade is < 6.0, the overall grade is capped at 6.0.
 
-**INSTRUCTION:** Hunt for flaws. Do not default to 9.5. Most cards are 8s or 9s. Be extremely cynical. If you cannot see the back of the card, assume standard wear.
+**INSTRUCTION:** Hunt for flaws. Do not default to 9.5. Most cards are 8s or 9s. Be extremely cynical. Awarding a 10 should feel like a rare event. Look specifically for whitening on the back corners and edge chipping.
 --- END OF NGA GRADING STANDARDS ---
 `;
 
+// As per instructions: "The API key must be obtained exclusively from the environment variable process.env.API_KEY."
+// and "Create a new GoogleGenAI instance right before making an API call"
 const getAIClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 };
@@ -186,7 +188,7 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
 
 export const generateCardSummary = async (frontImageBase64: string, backImageBase64: string, cardData: Partial<CardData>): Promise<string> => {
     const ai = getAIClient();
-    const prompt = `Write a 2-3 sentence report on why this card is a ${cardData.overallGrade}. Use subgrades: ${JSON.stringify(cardData.details)}. JSON: { "summary": string }`;
+    const prompt = `Write a professional 2-3 sentence report on why this card is a ${cardData.overallGrade}. Use subgrades: ${JSON.stringify(cardData.details)}. Mention visible flaws if the grade is below 9.5. JSON: { "summary": string }`;
     const responseSchema = { type: Type.OBJECT, properties: { summary: { type: Type.STRING } }, required: ['summary'] };
 
     const response = await withRetry<GenerateContentResponse>(
