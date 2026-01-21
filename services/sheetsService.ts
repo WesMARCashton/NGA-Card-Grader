@@ -2,9 +2,9 @@ import { CardData } from '../types';
 
 const SHEETS_API_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
 
-// Header definitions for the Google Sheet - aligned with CSV for consistency
+// Header definitions for the Google Sheet - YEAR is now in Column A (First)
 const SHEET_HEADERS = [
-    'ID', 'YEAR', 'COMPANY', 'SET', 'NAME', 'EDITION', 'NUMBER', 'GRADE NAME', 'GRADE',
+    'YEAR', 'COMPANY', 'SET', 'NAME', 'EDITION', 'NUMBER', 'GRADE NAME', 'GRADE', 'ID',
     'CENTERING GRADE', 'CENTERING NOTES',
     'CORNERS GRADE', 'CORNERS NOTES',
     'EDGES GRADE', 'EDGES NOTES',
@@ -43,7 +43,6 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
     const firstSheetName = sheetMetaData.sheets[0].properties.title;
 
     // 2. Check if the sheet is empty to decide if we need headers
-    // Explicitly checking A1:A1 to see if the sheet is fresh
     const checkResponse = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/'${encodeURIComponent(firstSheetName)}'!A1:A1`, {
         headers: { 'Authorization': `Bearer ${accessToken}` },
     });
@@ -64,16 +63,19 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
         const set = company.toUpperCase() === cardSet.toUpperCase() ? '' : cardSet;
         const cardNumber = card.cardNumber ? `#${card.cardNumber}` : '';
         
-        const stringValues = [
-            card.id,
-            card.year,
-            company,
-            set,
-            card.name,
-            card.edition,
-            cardNumber,
-            card.gradeName,
-        ].map(value => (value || '').toString().toUpperCase());
+        // Match the header order exactly: 
+        // YEAR, COMPANY, SET, NAME, EDITION, NUMBER, GRADE NAME, GRADE, ID
+        const coreInfo = [
+            (card.year || '').toString(),
+            company.toUpperCase(),
+            set.toUpperCase(),
+            (card.name || '').toUpperCase(),
+            (card.edition || '').toUpperCase(),
+            cardNumber.toUpperCase(),
+            (card.gradeName || '').toUpperCase(),
+            card.overallGrade,
+            card.id
+        ];
 
         const d = card.details;
         const subgrades = [
@@ -88,8 +90,7 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
         const sources = card.marketValue?.sourceUrls.map(s => s.uri).join(', ') || '';
 
         return [
-            ...stringValues,
-            card.overallGrade, 
+            ...coreInfo,
             ...subgrades,
             card.summary || '',
             marketVal,
@@ -99,9 +100,7 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
 
     rowsToAppend.push(...newRows);
 
-    // 4. Append the data
-    // CRITICAL: We use '!A1' at the end of the sheet name to anchor the search for existing data.
-    // Without '!A1', the API might look for the first non-empty cell anywhere and append relative to that.
+    // 4. Append the data using the !A1 anchor
     const appendRange = `'${firstSheetName}'!A1`;
     const appendResponse = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED`, {
         method: 'POST',

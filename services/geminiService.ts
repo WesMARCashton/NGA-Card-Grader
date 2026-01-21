@@ -41,21 +41,20 @@ const handleGeminiError = (error: any, context: string): Error => {
         } catch (e) { /* Ignore */ }
     }
 
-    // Handle specific error for resetting key selection
     if (originalErrorMessage.toLowerCase().includes('requested entity was not found')) {
         return new Error("API_KEY_RESET_REQUIRED");
     }
 
-    if (originalErrorMessage.toLowerCase().includes('model is overloaded')) {
-        userFriendlyMessage = "The AI model is currently busy. We are retrying automatically. If this persists, the API quota might be reached.";
+    if (originalErrorMessage.toLowerCase().includes('model is overloaded') || originalErrorMessage.toLowerCase().includes('busy')) {
+        userFriendlyMessage = "The AI model is currently busy. We are retrying automatically. If this continues, the service may be at capacity.";
     } else if (error instanceof SyntaxError || originalErrorMessage.includes('JSON')) {
         userFriendlyMessage = "The AI returned an invalid response. This can be intermittent. Please try again.";
-    } else if (originalErrorMessage.toLowerCase().includes('fetch')) {
-        userFriendlyMessage = "A network error occurred. Please check your internet connection and try again.";
-    } else if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('API Key is missing') || originalErrorMessage.includes('API_KEY_MISSING') || originalErrorMessage.includes('401')) {
+    } else if (originalErrorMessage.toLowerCase().includes('fetch') || originalErrorMessage.toLowerCase().includes('network')) {
+        userFriendlyMessage = "A network error occurred. Please check your internet connection.";
+    } else if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('401')) {
         return new Error("API_KEY_MISSING"); 
     } else {
-        userFriendlyMessage = `An unexpected error occurred: ${originalErrorMessage}`;
+        userFriendlyMessage = `Error: ${originalErrorMessage}`;
     }
     
     return new Error(userFriendlyMessage);
@@ -65,8 +64,8 @@ const withRetry = async <T>(
   apiCall: () => Promise<T>,
   context: string,
   onRetry?: (attempt: number, delay: number) => void,
-  retries = 10, // Increased retries
-  initialDelay = 3000 // Slightly longer initial delay
+  retries = 12, 
+  initialDelay = 3000
 ): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < retries; i++) {
@@ -75,28 +74,16 @@ const withRetry = async <T>(
     } catch (error: any) {
       lastError = error;
       let originalErrorMessage = error.message || '';
-      if (originalErrorMessage.includes('{') && originalErrorMessage.includes('}')) {
-        try {
-          const parsedError = JSON.parse(originalErrorMessage.substring(originalErrorMessage.indexOf('{')));
-          if (parsedError.error?.message) {
-            originalErrorMessage = parsedError.error.message;
-          }
-        } catch (e) { /* Ignore */ }
-      }
-
-      if (originalErrorMessage.toLowerCase().includes('requested entity was not found')) {
-          throw handleGeminiError(error, context);
-      }
-
+      
       const isRetryable = originalErrorMessage.toLowerCase().includes('model is overloaded') ||
+                          originalErrorMessage.toLowerCase().includes('busy') ||
                           originalErrorMessage.toLowerCase().includes('unavailable') ||
-                          originalErrorMessage.toLowerCase().includes('deadline exceeded') ||
                           originalErrorMessage.toLowerCase().includes('too many requests') ||
-                          originalErrorMessage.includes('503');
+                          originalErrorMessage.includes('503') ||
+                          originalErrorMessage.includes('504');
 
       if (isRetryable && i < retries - 1) {
-        // Exponential backoff with jitter
-        const delay = Math.min(initialDelay * Math.pow(2, i) + Math.random() * 1000, 30000);
+        const delay = Math.min(initialDelay * Math.pow(1.5, i) + Math.random() * 2000, 30000);
         onRetry?.(i + 1, delay);
         await new Promise(res => setTimeout(res, delay));
       } else {
@@ -178,8 +165,7 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
     const ai = getAIClient();
     const prompt = `
       **Task:** Identify the sports card from the provided images.
-      **Instructions:** Analyze the images and determine the player name, team, year, set, manufacturer (company), card number, and any specific edition.
-      **Output:** Return a single raw JSON object.
+      **Output:** Return a single raw JSON object with name, team, year, set, company, cardNumber, edition.
     `;
     
     const responseSchema = {
@@ -197,7 +183,7 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-flash-lite-latest', // Use lite for lighter identification task
+            model: 'gemini-3-flash-preview', 
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -219,10 +205,7 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
     const prompt = `
       **Task:** Perform a STRICT NGA grading analysis. Support half-points (e.g., 9.5).
       ${NGA_GRADING_GUIDE}
-      **Instructions:**
-      1. **Condition Analysis:** Assign subgrades (1-10, can be .5 increments) for Centering, Corners, Edges, Surface, Print Quality.
-      2. **Final Calculation:** Calculate \`overallGrade\` strictly using Step 6.
-      **Output:** Return a single raw JSON object.
+      **Output:** JSON with centering, corners, edges, surface, printQuality subgrades and overallGrade.
     `;
 
     const subGradeDetailSchema = {
@@ -251,7 +234,7 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-flash-latest', // Switched to 2.5 Flash for robustness
+            model: 'gemini-3-flash-preview', 
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -280,10 +263,7 @@ export const generateCardSummary = async (
       **Grade:** ${cardData.overallGrade} (${cardData.gradeName})
       **Subgrades:** ${JSON.stringify(cardData.details)}
       
-      **Instructions:**
-      Write a concise, expert summary (2-3 sentences) that justifies the overall grade.
-      
-      **Output:** Return a single raw JSON object.
+      **Instructions:** Concise expert summary (2-3 sentences).
     `;
 
     const responseSchema = {
@@ -296,7 +276,7 @@ export const generateCardSummary = async (
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-flash-latest',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -320,12 +300,11 @@ export const challengeGrade = async (
     direction: 'higher' | 'lower',
     onStatusUpdate: (status: string) => void
 ): Promise<{ details: EvaluationDetails, summary: string, overallGrade: number, gradeName: string }> => {
-    onStatusUpdate('Initializing AI model for challenge...');
+    onStatusUpdate('Initializing AI re-evaluation...');
     const ai = getAIClient();
 
     const challengePrompt = `
-      **Persona & Task:**
-      You are reviewing a colleague's work. User challenged the grade as **${direction}**. Re-evaluate strictly using the NGA Guide. Support half-points.
+      **Task:** Re-evaluate strictly as **${direction}**.
       ${NGA_GRADING_GUIDE}
       **Initial Assessment:** ${JSON.stringify(card.details)}
     `;
@@ -358,10 +337,10 @@ export const challengeGrade = async (
     const frontImageBase64 = dataUrlToBase64(card.frontImage);
     const backImageBase64 = dataUrlToBase64(card.backImage);
     
-    onStatusUpdate('Re-evaluating card...');
+    onStatusUpdate('Reviewing card details...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-flash-latest',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: challengePrompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -375,7 +354,6 @@ export const challengeGrade = async (
         'grade challenge'
     );
 
-    onStatusUpdate('Finalizing re-evaluation...');
     const result = extractJson(response.text);
     return {
         details: result.details,
@@ -393,12 +371,11 @@ export const regenerateCardAnalysisForGrade = async (
     targetGradeName: string,
     onStatusUpdate: (status: string) => void
 ): Promise<{ details: EvaluationDetails, summary: string }> => {
-    onStatusUpdate('Initializing AI model for analysis...');
+    onStatusUpdate('Re-analyzing for new grade...');
     const ai = getAIClient();
 
     const prompt = `
-      **Persona & Task:**
-      Assign subgrades to justify a final grade of **${targetGrade} (${targetGradeName})**. Support half-points.
+      **Task:** Justify a grade of **${targetGrade} (${targetGradeName})**.
       ${NGA_GRADING_GUIDE}
     `;
 
@@ -425,10 +402,9 @@ export const regenerateCardAnalysisForGrade = async (
       required: ['details', 'summary'],
     };
 
-    onStatusUpdate('Regenerating analysis report...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-flash-latest',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -442,7 +418,6 @@ export const regenerateCardAnalysisForGrade = async (
         'analysis regeneration'
     );
 
-    onStatusUpdate('Finalizing analysis report...');
     const result = extractJson(response.text);
     return {
         details: result.details,
@@ -460,12 +435,12 @@ export const getCardMarketValue = async (
     const prompt = `
       **Task:** Find recent sold prices for a sports card.
       Query: "${cardSearchTerm}"
-      Output JSON only.
+      Output JSON only with averagePrice, minPrice, maxPrice, currency.
     `;
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-flash-latest',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [{ text: prompt }] },
             config: {
                 tools: [{ googleSearch: {} }], 
@@ -475,12 +450,11 @@ export const getCardMarketValue = async (
         'getting market value'
     );
 
-    const jsonText = response.text || "{}";
     let marketData: any = {};
     try {
-        marketData = extractJson(jsonText);
+        marketData = extractJson(response.text);
     } catch (e) {
-        throw new Error("Could not parse market value data.");
+        throw new Error("Could not parse market data.");
     }
 
     const sourceUrls: { title: string; uri: string }[] = [];
