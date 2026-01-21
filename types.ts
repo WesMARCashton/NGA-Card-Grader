@@ -1,9 +1,17 @@
 
 declare global {
+  // Define AIStudio interface as required by the environment's window augmentation
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+
   interface Window {
     env: {
       VITE_API_KEY: string;
-    }
+    };
+    // Use the explicit AIStudio type to prevent subsequent declaration conflicts
+    aistudio: AIStudio;
   }
 }
 
