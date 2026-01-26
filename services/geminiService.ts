@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, GenerateContentResponse, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { CardData, EvaluationDetails, MarketValue } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
@@ -106,10 +107,6 @@ const getAIClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-/**
- * High-speed combined analysis: Identification + Grading + Summary
- * Uses Flash model for ultra-low latency.
- */
 export const analyzeCardFull = async (frontImageBase64: string, backImageBase64: string): Promise<any> => {
     const ai = getAIClient();
     const sessionSalt = Math.random().toString(36).substring(7);
@@ -173,7 +170,6 @@ export const analyzeCardFull = async (frontImageBase64: string, backImageBase64:
     return extractJson(response);
 };
 
-// Keep old exports but proxy to the new flow or specialized versions for retries/manuals
 export const identifyCard = async (f: string, b: string) => (await analyzeCardFull(f, b));
 export const gradeCardPreliminary = async (f: string, b: string) => (await analyzeCardFull(f, b));
 export const generateCardSummary = async (f: string, b: string, data: any) => (await analyzeCardFull(f, b)).summary;
@@ -257,7 +253,10 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
 export const getCardMarketValue = async (card: CardData): Promise<MarketValue> => {
     const ai = getAIClient();
     const query = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} Grade ${card.overallGrade}`;
-    const prompt = `Find recent sold listings for: "${query}". Return market value range. JSON: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": string, "notes": string }.`;
+    
+    // Optimized prompt for latency: direct and concise.
+    const prompt = `QUICK SEARCH: Find the current market value range for this specific sports card based on recent sold listings: "${query}". 
+    Return strictly JSON: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": "USD", "notes": "brief source summary" }.`;
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
@@ -266,7 +265,9 @@ export const getCardMarketValue = async (card: CardData): Promise<MarketValue> =
             config: { 
               safetySettings,
               tools: [{ googleSearch: {} }], 
-              temperature: 0.1 
+              temperature: 0.1,
+              // Disable thinking to minimize latency for this direct search task.
+              thinkingConfig: { thinkingBudget: 0 }
             }
         }),
         'market value'
