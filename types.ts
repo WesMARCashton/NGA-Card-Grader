@@ -72,10 +72,10 @@ export interface CardData {
   timestamp: number;
   gradingSystem: 'NGA';
   isSynced?: boolean;
-  scannedBy?: string; // For Admin tracking
+  scannedBy?: string; 
 
   errorMessage?: string;
   challengeDirection?: 'higher' | 'lower';
 }
 
-export type AppView = 'scanner' | 'history' | 'admin';
+export type AppView = 'scanner' | 'history';
