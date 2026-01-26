@@ -36,7 +36,7 @@ export const useGoogleAuth = () => {
     return null;
   });
   const [tokenClient, setTokenClient] = useState<any>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false); // New state to signal when GSI is ready
+  const [isAuthReady, setIsAuthReady] = useState(false); 
   const inFlightTokenRequest = useRef<Promise<string> | null>(null);
   const cachedTokenRef = useRef<CachedToken | null>(null);
 
@@ -69,10 +69,11 @@ export const useGoogleAuth = () => {
     const initializeGsi = () => {
         const clientId = document.querySelector<HTMLMetaElement>('meta[name="google-signin-client_id"]')?.content;
 
-        if (!clientId || clientId.startsWith('YOUR_GOOGLE_CLIENT_ID')) {
-            console.error("Google Client ID not found or not configured. Please update index.html.");
-            setIsAuthReady(true); // Set to true to unblock, even on error
-            return;
+        if (!clientId || clientId.startsWith('716520201321')) { // Allow provided ID
+        } else {
+             console.error("Google Client ID not found or not configured.");
+             setIsAuthReady(true);
+             return;
         }
 
         if (typeof google !== 'undefined' && google.accounts) {
@@ -87,7 +88,7 @@ export const useGoogleAuth = () => {
               callback: () => {}, // Callback is overridden per request
             });
             setTokenClient(client);
-            setIsAuthReady(true); // Signal that the auth client is ready
+            setIsAuthReady(true); 
         }
     }
     
@@ -100,21 +101,13 @@ export const useGoogleAuth = () => {
         return () => script.removeEventListener('load', initializeGsi);
       }
     }
-
   }, []);
 
-  /**
-   * Request an access token.
-   * @param silent If true, attempts to get token without user interaction (no popups). 
-   *               If this fails (e.g. interaction required), it rejects.
-   */
   const getAccessToken = useCallback((silent: boolean = false): Promise<string> => {
-    // 1. Check Cache
     if (cachedTokenRef.current && Date.now() < cachedTokenRef.current.expiresAt - (5 * 60 * 1000)) {
       return Promise.resolve(cachedTokenRef.current.token);
     }
     
-    // 2. Check In-Flight Requests
     if (inFlightTokenRequest.current) {
       return inFlightTokenRequest.current;
     }
@@ -122,14 +115,15 @@ export const useGoogleAuth = () => {
     const authPromise = new Promise<string>((resolve, reject) => {
       if (!tokenClient) {
         inFlightTokenRequest.current = null;
-        return reject(new Error('Authentication client not ready. Please wait or refresh.'));
+        return reject(new Error('Authentication client not ready.'));
       }
       
-      // 3. Set Timeout (Prevent hanging forever)
+      // Shorter timeout for silent requests to prevent hanging
+      const timeoutDuration = silent ? 5000 : 20000;
       const timeoutId = setTimeout(() => {
           inFlightTokenRequest.current = null;
-          reject(new Error('Authentication timed out. Please try signing in again.'));
-      }, 15000); // 15 second timeout
+          reject(new Error(silent ? 'Silent authentication failed.' : 'Authentication timed out.'));
+      }, timeoutDuration);
 
       tokenClient.callback = (tokenResponse: any) => {
         clearTimeout(timeoutId);
@@ -143,21 +137,11 @@ export const useGoogleAuth = () => {
           };
           resolve(tokenResponse.access_token);
         } else {
-          console.error('Google Auth Error Response:', tokenResponse);
           const error = tokenResponse?.error_description || tokenResponse?.error || 'Failed to retrieve access token.';
-          
-          // If we tried silent and failed, propagate specific error so we can fallback to interactive
-          if (silent && (error === 'interaction_required' || tokenResponse?.error === 'interaction_required')) {
-              reject(new Error('interaction_required'));
-          } else {
-              reject(new Error(error));
-          }
+          reject(new Error(error));
         }
       };
 
-      // 4. Request Token
-      // If silent is true, use prompt: '' to attempt background auth. 
-      // Otherwise use undefined (default) or explicit consent if needed.
       const config = silent ? { prompt: '' } : { prompt: 'consent' };
       tokenClient.requestAccessToken(config);
     });

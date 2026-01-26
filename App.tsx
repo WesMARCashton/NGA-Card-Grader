@@ -41,8 +41,10 @@ const App: React.FC = () => {
   const [hasApiKey, setHasApiKey] = useState(!!localStorage.getItem(MANUAL_API_KEY_STORAGE) || !!process.env.API_KEY);
 
   const processingCards = useRef(new Set<string>());
+  const lastSavedCardsRef = useRef<string>('');
   const CONCURRENCY_LIMIT = 2;
 
+  // 1. Fetch collection on mount
   const refreshCollection = useCallback(async (silent: boolean = false) => {
     if (!user || !getAccessToken) return;
     setSyncStatus('loading');
@@ -52,6 +54,7 @@ const App: React.FC = () => {
       setCards(loadedCards || []);
       setDriveFileId(fileId);
       setSyncStatus('success');
+      lastSavedCardsRef.current = JSON.stringify(loadedCards || []);
     } catch (err: any) {
       console.error("Refresh collection failed:", err);
       setSyncStatus('error');
@@ -59,23 +62,38 @@ const App: React.FC = () => {
   }, [user, getAccessToken]);
 
   useEffect(() => {
-    if (user && isAuthReady) refreshCollection(true);
-  }, [user, isAuthReady, refreshCollection]);
-
-  const saveCollectionToDrive = useCallback(async (cardsToSave: CardData[]) => {
-    if (!user || !getAccessToken) return;
-    try {
-      const token = await getAccessToken(true); 
-      const newFileId = await saveCollection(token, driveFileId, cardsToSave);
-      setDriveFileId(newFileId);
-    } catch (err: any) {
-      console.error("Save to Drive failed:", err);
+    if (user && isAuthReady) {
+      refreshCollection(true);
     }
-  }, [user, getAccessToken, driveFileId]);
+  }, [user, isAuthReady]);
 
+  // 2. Persist collection to Drive whenever cards change (and processing finishes)
+  useEffect(() => {
+    const saveTimeout = setTimeout(async () => {
+      const isStillProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary', 'fetching_value'].includes(c.status));
+      const currentCardsStr = JSON.stringify(cards);
+      
+      // Only save if data actually changed and we aren't in the middle of a high-frequency update
+      if (user && getAccessToken && !isStillProcessing && currentCardsStr !== lastSavedCardsRef.current) {
+        try {
+          const token = await getAccessToken(true);
+          const newFileId = await saveCollection(token, driveFileId, cards);
+          setDriveFileId(newFileId);
+          lastSavedCardsRef.current = currentCardsStr;
+        } catch (err) {
+          console.error("Auto-save to Drive failed:", err);
+        }
+      }
+    }, 2000); // 2 second debounce
+
+    return () => clearTimeout(saveTimeout);
+  }, [cards, user, getAccessToken, driveFileId]);
+
+  // 3. Background Processing Logic
   const processCardInBackground = useCallback(async (cardToProcess: CardData) => {
     if (processingCards.current.has(cardToProcess.id)) return;
     processingCards.current.add(cardToProcess.id);
+    
     try {
       let finalCardData: Partial<CardData> = {};
       let finalStatus: CardData['status'] = 'needs_review';
@@ -103,38 +121,48 @@ const App: React.FC = () => {
           processingCards.current.delete(cardToProcess.id);
           return;
       }
-      setCards(current => {
-        const updated = current.map(c => c.id === cardToProcess.id ? { ...c, ...finalCardData, status: finalStatus, isSynced: false } : c);
-        saveCollectionToDrive(updated);
-        return updated;
-      });
+      
+      setCards(current => current.map(c => 
+        c.id === cardToProcess.id ? { ...c, ...finalCardData, status: finalStatus, isSynced: false } : c
+      ));
     } catch (err: any) {
       if (err.message === "API_KEY_MISSING") setShowApiKeyModal(true);
-      setCards(current => {
-        const updated = current.map(c => c.id === cardToProcess.id ? { ...c, status: 'grading_failed' as const, errorMessage: err.message } : c);
-        saveCollectionToDrive(updated);
-        return updated;
-      });
+      setCards(current => current.map(c => 
+        c.id === cardToProcess.id ? { ...c, status: 'grading_failed' as const, errorMessage: err.message } : c
+      ));
     } finally {
       processingCards.current.delete(cardToProcess.id);
     }
-  }, [saveCollectionToDrive]);
+  }, []);
 
   useEffect(() => {
-    const queue = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'fetching_value'].includes(c.status) && !processingCards.current.has(c.id));
+    const queue = cards.filter(c => 
+      ['grading', 'challenging', 'regenerating_summary', 'fetching_value'].includes(c.status) && 
+      !processingCards.current.has(c.id)
+    );
+    
     if (queue.length > 0 && processingCards.current.size < CONCURRENCY_LIMIT) {
       queue.slice(0, CONCURRENCY_LIMIT - processingCards.current.size).forEach(c => processCardInBackground(c));
     }
   }, [cards, processCardInBackground]);
 
-  const handleRatingRequest = useCallback(async (f: string, b: string) => {
-    const newCard: CardData = { id: generateId(), frontImage: f, backImage: b, timestamp: Date.now(), gradingSystem: 'NGA', isSynced: false, status: 'grading' };
-    setCards(current => {
-        const updated = [newCard, ...current];
-        saveCollectionToDrive(updated);
-        return updated;
-    });
-  }, [saveCollectionToDrive]);
+  const handleRatingRequest = useCallback((f: string, b: string) => {
+    const newCard: CardData = { 
+      id: generateId(), 
+      frontImage: f, 
+      backImage: b, 
+      timestamp: Date.now(), 
+      gradingSystem: 'NGA', 
+      isSynced: false, 
+      status: 'grading' 
+    };
+    
+    setCards(current => [newCard, ...current]);
+    // Switch to history view immediately so user sees progress
+    setView('history');
+  }, []);
+
+  const isAnyCardGrading = cards.some(c => ['grading', 'challenging', 'regenerating_summary'].includes(c.status));
 
   return (
     <div className="min-h-screen font-sans flex flex-col items-center p-4">
@@ -157,21 +185,11 @@ const App: React.FC = () => {
                 <CardHistory 
                   cards={cards} 
                   onBack={() => setView('scanner')} 
-                  onDelete={id => {
-                    const updated = cards.filter(c => c.id !== id);
-                    setCards(updated);
-                    saveCollectionToDrive(updated);
-                  }} 
+                  onDelete={id => setCards(cur => cur.filter(c => c.id !== id))} 
                   getAccessToken={() => getAccessToken(false)} 
-                  onCardsSynced={synced => {
-                    const updated = cards.map(c => synced.some(s => s.id === c.id) ? { ...c, isSynced: true } : c);
-                    setCards(updated);
-                    saveCollectionToDrive(updated);
-                  }}
+                  onCardsSynced={synced => setCards(cur => cur.map(c => synced.some(s => s.id === c.id) ? { ...c, isSynced: true } : c))}
                   onChallengeGrade={(c, d) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'challenging', challengeDirection: d } : x))}
-                  onResync={async (c) => {
-                     // Single card resync logic if needed, currently handled via the resync all flow
-                  }}
+                  onResync={async () => {}}
                   onRetryGrading={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'grading', errorMessage: undefined } : x))}
                   onRewriteAllAnalyses={async () => {}}
                   resetRewriteState={() => {}}
@@ -185,8 +203,8 @@ const App: React.FC = () => {
             ) : (
                 <CardScanner 
                   onRatingRequest={handleRatingRequest} 
-                  isGrading={false} 
-                  gradingStatus={''} 
+                  isGrading={isAnyCardGrading} 
+                  gradingStatus={isAnyCardGrading ? 'Processing queue...' : ''} 
                   isLoggedIn={!!user}
                   hasCards={cards.length > 0}
                   onSyncDrive={() => refreshCollection(false)}
