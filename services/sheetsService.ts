@@ -47,15 +47,16 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
     const rowsToAppend: any[][] = needsHeaders ? [SHEET_HEADERS] : [];
     const newRows = cardsToSync.map(card => {
         const d = card.details;
+        // B, C, D, E, F, G, H correspond to indices 1, 2, 3, 4, 5, 6, 7
         return [
             card.year || '', 
-            card.company || '', 
-            card.team || '', 
-            card.name || '', 
-            card.edition || '', 
-            card.set || '', 
-            card.cardNumber || '', 
-            card.gradeName || '', 
+            (card.company || '').toUpperCase(),      // Column B
+            (card.team || '').toUpperCase(),         // Column C
+            (card.name || '').toUpperCase(),         // Column D
+            (card.edition || '').toUpperCase(),      // Column E
+            (card.set || '').toUpperCase(),          // Column F
+            (card.cardNumber || '').toUpperCase(),   // Column G
+            (card.gradeName || '').toUpperCase(),    // Column H
             card.overallGrade,
             '', // Column J: empty
             '', // Column K: empty

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -30,6 +29,56 @@ const generateId = () => {
 };
 
 const App: React.FC = () => {
+  // ---- iframe auto-resize: report app height to parent (WordPress) ----
+  useEffect(() => {
+    /**
+     * IMPORTANT:
+     * Set this to your WordPress site ORIGIN only (no trailing slash, no path).
+     * Examples:
+     *  - "https://nga.com"
+     *  - "https://www.nga.com"
+     */
+    const PARENT_ORIGIN = "https://ngacard.com";
+
+    const sendHeight = () => {
+      const height = Math.max(
+        document.documentElement.scrollHeight,
+        document.body.scrollHeight,
+        document.documentElement.offsetHeight,
+        document.body.offsetHeight
+      );
+
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(
+          { type: "NGA_IFRAME_HEIGHT", height },
+          PARENT_ORIGIN
+        );
+      }
+    };
+
+    // initial send
+    sendHeight();
+
+    // send whenever layout changes (guard for older browsers)
+    let ro: ResizeObserver | null = null;
+    if ("ResizeObserver" in window) {
+      ro = new ResizeObserver(() => sendHeight());
+      ro.observe(document.documentElement);
+    }
+
+    // if parent asks for height again
+    const onMsg = (e: MessageEvent) => {
+      if (e.data && e.data.type === "NGA_IFRAME_PING") sendHeight();
+    };
+    window.addEventListener("message", onMsg);
+
+    return () => {
+      ro && ro.disconnect();
+      window.removeEventListener("message", onMsg);
+    };
+  }, []);
+  // ---- end iframe auto-resize ----
+
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
   
   const [view, setView] = useState<AppView>('scanner');
@@ -169,59 +218,59 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen font-sans flex flex-col items-center p-4">
-        <header className="w-full max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center p-4 gap-4">
-            <div className="flex items-center gap-4">
-              <img src="https://mcusercontent.com/d7331d7f90c4b088699bd7282/images/98cb8f09-7621-798a-803a-26d394c7b10f.png" alt="Logo" className="h-10 w-auto" />
-            </div>
-            <div className="flex items-center gap-2">
-              {user && (
-                <button onClick={() => setView(view === 'history' ? 'scanner' : 'history')} className="flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300">
-                  <HistoryIcon className="h-5 w-5" />
-                  <span className="hidden sm:inline">My Collection</span>
-                </button>
-              )}
-              <Auth user={user} onSignOut={signOut} isAuthReady={isAuthReady} />
-            </div>
-        </header>
-        <main className="w-full flex-grow flex flex-col items-center">
-            {view === 'history' ? (
-                <CardHistory 
-                  cards={cards} 
-                  onBack={() => setView('scanner')} 
-                  onDelete={id => setCards(cur => cur.filter(c => c.id !== id))} 
-                  getAccessToken={() => getAccessToken(false)} 
-                  onCardsSynced={synced => setCards(cur => cur.map(c => synced.some(s => s.id === c.id) ? { ...c, isSynced: true } : c))}
-                  onChallengeGrade={(c, d) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'challenging', challengeDirection: d } : x))}
-                  onResync={async () => {}}
-                  onRetryGrading={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'grading', errorMessage: undefined } : x))}
-                  onRewriteAllAnalyses={async () => {}}
-                  resetRewriteState={() => {}}
-                  isRewriting={false} rewriteProgress={0} rewrittenCount={0} rewriteFailCount={0} rewriteStatusMessage={''}
-                  onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'fetching_value' } : c))}
-                  onManualGrade={(c, g, n) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n } : x))}
-                  onLoadCollection={() => refreshCollection(false)} 
-                  onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value' } : x))}
-                  userName={user?.name || 'Anonymous'}
-                />
-            ) : (
-                <CardScanner 
-                  onRatingRequest={handleRatingRequest} 
-                  isGrading={isBlockingProcessing} 
-                  gradingStatus={isBlockingProcessing ? 'Grading card...' : ''} 
-                  isLoggedIn={!!user}
-                  hasCards={cards.length > 0}
-                  onSyncDrive={() => refreshCollection(false)}
-                  isSyncing={syncStatus === 'loading'}
-                />
-            )}
-            
-            {showApiKeyModal && (
-              <ApiKeyModal 
-                onSave={key => { localStorage.setItem(MANUAL_API_KEY_STORAGE, key); setShowApiKeyModal(false); window.location.reload(); }}
-                onClose={() => setShowApiKeyModal(false)}
-              />
-            )}
-        </main>
+      <header className="w-full max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center p-4 gap-4">
+        <div className="flex items-center gap-4">
+          <img src="https://mcusercontent.com/d7331d7f90c4b088699bd7282/images/98cb8f09-7621-798a-803a-26d394c7b10f.png" alt="Logo" className="h-10 w-auto" />
+        </div>
+        <div className="flex items-center gap-2">
+          {user && (
+            <button onClick={() => setView(view === 'history' ? 'scanner' : 'history')} className="flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300">
+              <HistoryIcon className="h-5 w-5" />
+              <span className="hidden sm:inline">My Collection</span>
+            </button>
+          )}
+          <Auth user={user} onSignOut={signOut} isAuthReady={isAuthReady} />
+        </div>
+      </header>
+      <main className="w-full flex-grow flex flex-col items-center">
+        {view === 'history' ? (
+          <CardHistory 
+            cards={cards} 
+            onBack={() => setView('scanner')} 
+            onDelete={id => setCards(cur => cur.filter(c => c.id !== id))} 
+            getAccessToken={() => getAccessToken(false)} 
+            onCardsSynced={synced => setCards(cur => cur.map(c => synced.some(s => s.id === c.id) ? { ...c, isSynced: true } : c))}
+            onChallengeGrade={(c, d) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'challenging', challengeDirection: d } : x))}
+            onResync={async () => {}}
+            onRetryGrading={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'grading', errorMessage: undefined } : x))}
+            onRewriteAllAnalyses={async () => {}}
+            resetRewriteState={() => {}}
+            isRewriting={false} rewriteProgress={0} rewrittenCount={0} rewriteFailCount={0} rewriteStatusMessage={''}
+            onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'fetching_value' } : c))}
+            onManualGrade={(c, g, n) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n } : x))}
+            onLoadCollection={() => refreshCollection(false)} 
+            onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value' } : x))}
+            userName={user?.name || 'Anonymous'}
+          />
+        ) : (
+          <CardScanner 
+            onRatingRequest={handleRatingRequest} 
+            isGrading={isBlockingProcessing} 
+            gradingStatus={isBlockingProcessing ? 'Grading card...' : ''} 
+            isLoggedIn={!!user}
+            hasCards={cards.length > 0}
+            onSyncDrive={() => refreshCollection(false)}
+            isSyncing={syncStatus === 'loading'}
+          />
+        )}
+        
+        {showApiKeyModal && (
+          <ApiKeyModal 
+            onSave={key => { localStorage.setItem(MANUAL_API_KEY_STORAGE, key); setShowApiKeyModal(false); window.location.reload(); }}
+            onClose={() => setShowApiKeyModal(false)}
+          />
+        )}
+      </main>
     </div>
   );
 };
