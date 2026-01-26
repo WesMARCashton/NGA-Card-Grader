@@ -9,11 +9,12 @@ interface SyncSheetModalProps {
     onClose: () => void;
     getAccessToken: () => Promise<string>;
     onSyncSuccess: (syncedCards: CardData[]) => void;
+    userName: string;
 }
 
 const STORAGE_KEY = 'google_sheet_url';
 
-export const SyncSheetModal: React.FC<SyncSheetModalProps> = ({ cardsToSync, onClose, getAccessToken, onSyncSuccess }) => {
+export const SyncSheetModal: React.FC<SyncSheetModalProps> = ({ cardsToSync, onClose, getAccessToken, onSyncSuccess, userName }) => {
     const [sheetUrl, setSheetUrl] = useState('');
     const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
     const [errorMessage, setErrorMessage] = useState('');
@@ -41,8 +42,8 @@ export const SyncSheetModal: React.FC<SyncSheetModalProps> = ({ cardsToSync, onC
             localStorage.setItem(STORAGE_KEY, cleanUrl);
             
             const token = await getAccessToken();
-            // Pass the fresh URL to the service
-            await syncToSheet(token, cleanUrl, cardsToSync);
+            // Pass the fresh URL and user name to the service
+            await syncToSheet(token, cleanUrl, cardsToSync, userName);
             
             onSyncSuccess(cardsToSync); 
             setStatus('success');

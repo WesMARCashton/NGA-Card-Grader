@@ -1,6 +1,5 @@
 
 declare global {
-  // Define AIStudio interface as required by the environment's window augmentation
   interface AIStudio {
     hasSelectedApiKey: () => Promise<boolean>;
     openSelectKey: () => Promise<void>;
@@ -10,7 +9,6 @@ declare global {
     env: {
       VITE_API_KEY: string;
     };
-    // Fix: Made aistudio optional to ensure identical modifiers across declarations (Line 15)
     aistudio?: AIStudio;
   }
 }
@@ -55,7 +53,7 @@ export interface CardData {
   name?: string;
   team?: string;
   set?: string;
-  edition?: string; // e.g., 'Base', 'Chrome', 'Refractor'
+  edition?: string; 
   cardNumber?: string;
   company?: string;
   year?: string;
@@ -64,19 +62,20 @@ export interface CardData {
   backImage: string;
   
   overallGrade?: number;
-  gradeName?: string; // e.g., "Mint", "Gem Mint"
+  gradeName?: string; 
   
   details?: EvaluationDetails;
   summary?: string;
   
-  marketValue?: MarketValue; // Added market value field
+  marketValue?: MarketValue; 
   
   timestamp: number;
   gradingSystem: 'NGA';
   isSynced?: boolean;
+  scannedBy?: string; // For Admin tracking
 
   errorMessage?: string;
   challengeDirection?: 'higher' | 'lower';
 }
 
-export type AppView = 'scanner' | 'history';
+export type AppView = 'scanner' | 'history' | 'admin';

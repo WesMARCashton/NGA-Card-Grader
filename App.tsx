@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -11,27 +12,24 @@ import {
   getCardMarketValue
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
-import { syncToSheet } from './services/sheetsService';
-import { HistoryIcon, KeyIcon, SpinnerIcon, CheckIcon } from './components/icons';
+import { syncToSheet, fetchCardsFromSheet } from './services/sheetsService';
+import { HistoryIcon, KeyIcon, SpinnerIcon, CheckIcon, GavelIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
 import { SyncSheetModal } from './components/SyncSheetModal';
 import { ApiKeyModal } from './components/ApiKeyModal';
 
 const BACKUP_KEY = 'nga_card_backup';
 const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
+const ADMIN_KEY = 'is_admin_mode';
 
 if (typeof window !== 'undefined') {
   if (!(window as any).process) (window as any).process = { env: {} };
   const savedKey = localStorage.getItem(MANUAL_API_KEY_STORAGE);
-  if (savedKey) {
-    (process.env as any).API_KEY = savedKey;
-  }
+  if (savedKey) (process.env as any).API_KEY = savedKey;
 }
 
 const generateId = () => {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 };
 
@@ -40,109 +38,76 @@ const App: React.FC = () => {
   
   const [view, setView] = useState<AppView>('scanner');
   const [cards, setCards] = useState<CardData[]>([]);
+  const [isAdminMode, setIsAdminMode] = useState(localStorage.getItem(ADMIN_KEY) === 'true');
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [isRewriting, setIsRewriting] = useState(false);
-  const [rewriteProgress, setRewriteProgress] = useState(0);
-  const [rewrittenCount, setRewrittenCount] = useState(0);
-  const [rewriteFailCount, setRewriteFailCount] = useState(0);
-  const [rewriteStatusMessage, setRewriteStatusMessage] = useState('');
   
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(!!localStorage.getItem(MANUAL_API_KEY_STORAGE) || !!process.env.API_KEY);
 
   const processingCards = useRef(new Set<string>());
   const CONCURRENCY_LIMIT = 2;
 
-  const handleOpenKeySelector = useCallback(async () => {
-    const aistudio = (window as any).aistudio;
-    if (aistudio && typeof aistudio.openSelectKey === 'function') {
-      try {
-        await aistudio.openSelectKey();
-        setHasApiKey(true);
-      } catch (e) {
-        setShowApiKeyModal(true);
-      }
-    } else {
-      setShowApiKeyModal(true);
-    }
-  }, []);
-
-  const handleSaveManualKey = (key: string) => {
-    localStorage.setItem(MANUAL_API_KEY_STORAGE, key);
-    if (!(window as any).process) (window as any).process = { env: {} };
-    (process.env as any).API_KEY = key;
-    setHasApiKey(true);
-    setShowApiKeyModal(false);
-    setError(null);
-    setCards(current => current.map(c => c.status === 'grading_failed' ? { ...c, status: 'grading', errorMessage: undefined } : c));
-  };
-
-  useEffect(() => {
-    if (cards.length > 0) {
-      try {
-        localStorage.setItem(BACKUP_KEY, JSON.stringify(cards));
-      } catch (e) {
-        console.warn("Local backup failed", e);
-      }
-    }
-  }, [cards]);
-
-  useEffect(() => {
-    if (user) {
-      const backup = localStorage.getItem(BACKUP_KEY);
-      if (backup) {
-        try {
-          const savedCards: CardData[] = JSON.parse(backup);
-          if (savedCards.length > 0) {
-            const recoveredCards = savedCards.map(c => {
-              if (['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status)) {
-                return { ...c, status: 'grading_failed' as const, errorMessage: 'Recovered after crash.' };
-              }
-              return c;
-            });
-            setCards(current => current.length === 0 ? recoveredCards : current);
-          }
-        } catch (e) {
-          console.error("Failed to parse backup", e);
-        }
-      }
-    } else {
-      setCards([]);
-      setDriveFileId(null);
-      setError(null);
-    }
-  }, [user]);
-
-  const handleSyncWithDrive = useCallback(async (silent: boolean = false) => {
+  // Fetch data based on mode
+  const refreshCollection = useCallback(async (silent: boolean = false) => {
     if (!user || !getAccessToken) return;
     setSyncStatus('loading');
     try {
       const token = await getAccessToken(silent);
-      const { fileId, cards: loadedCards } = await getCollection(token);
-      setCards(loadedCards || []);
-      setDriveFileId(fileId);
+      if (isAdminMode) {
+        const sheetUrl = localStorage.getItem('google_sheet_url');
+        if (!sheetUrl) throw new Error("No Master Hub URL configured.");
+        const masterCards = await fetchCardsFromSheet(token, sheetUrl);
+        setCards(masterCards);
+      } else {
+        const { fileId, cards: loadedCards } = await getCollection(token);
+        setCards(loadedCards || []);
+        setDriveFileId(fileId);
+      }
       setSyncStatus('success');
-      if (!silent) setView('history');
     } catch (err: any) {
       setSyncStatus('error');
     }
-  }, [user, getAccessToken]);
+  }, [user, getAccessToken, isAdminMode]);
+
+  useEffect(() => {
+    if (user) refreshCollection(true);
+  }, [user, isAdminMode, refreshCollection]);
+
+  const handleMigration = async () => {
+    if (!user || !getAccessToken) return;
+    const token = await getAccessToken();
+    const sheetUrl = localStorage.getItem('google_sheet_url');
+    if (!sheetUrl) throw new Error("Please configure a Master Hub URL in settings first.");
+    
+    // Migration logic: Sync ALL cards that aren't already marked as published in local state
+    const { cards: localCards } = await getCollection(token);
+    if (localCards.length === 0) return;
+    
+    await syncToSheet(token, sheetUrl, localCards, user.name);
+    
+    // Update Drive to mark all as synced
+    const updatedCards = localCards.map(c => ({ ...c, isSynced: true }));
+    await saveCollection(token, driveFileId, updatedCards);
+    setCards(updatedCards);
+  };
+
+  const handleToggleAdmin = (isAdmin: boolean) => {
+    setIsAdminMode(isAdmin);
+    setView('history'); // Swapping mode usually means you want to see the collection
+  };
 
   const saveCollectionToDrive = useCallback(async (cardsToSave: CardData[]) => {
-    if (!user || !getAccessToken) return;
+    if (!user || !getAccessToken || isAdminMode) return; // Admin mode is Read-Only for the sheet view
     try {
       const token = await getAccessToken(true); 
       await saveCollection(token, driveFileId, cardsToSave);
     } catch (err: any) {}
-  }, [user, getAccessToken, driveFileId]);
+  }, [user, getAccessToken, driveFileId, isAdminMode]);
 
   const processCardInBackground = useCallback(async (cardToProcess: CardData) => {
     if (processingCards.current.has(cardToProcess.id)) return;
     processingCards.current.add(cardToProcess.id);
-  
     try {
       let finalCardData: Partial<CardData> = {};
       let finalStatus: CardData['status'] = 'needs_review';
@@ -151,39 +116,32 @@ const App: React.FC = () => {
 
       switch (cardToProcess.status) {
         case 'grading':
-          // Consolidated Analyze step (Identification + Grade + Summary in one call)
-          const results = await analyzeCardFull(f64, b64);
-          finalCardData = results;
-          finalStatus = 'needs_review'; // Always go to review after full analysis
-          break;
-        case 'generating_summary':
-          // This state is now mostly bypassed for new cards, but kept for legacy/compatibility
-          finalStatus = 'fetching_value';
+          finalCardData = await analyzeCardFull(f64, b64);
+          finalStatus = 'needs_review';
           break;
         case 'challenging':
-          finalCardData = { ...await challengeGrade(cardToProcess, cardToProcess.challengeDirection!, () => {}), challengeDirection: undefined };
-          finalStatus = 'needs_review' as const;
+          finalCardData = await challengeGrade(cardToProcess, cardToProcess.challengeDirection!, () => {});
+          finalStatus = 'needs_review';
           break;
         case 'regenerating_summary':
           finalCardData = await regenerateCardAnalysisForGrade(f64, b64, cardToProcess, cardToProcess.overallGrade!, cardToProcess.gradeName!, () => {});
-          finalStatus = 'fetching_value' as const;
+          finalStatus = 'reviewed';
           break;
         case 'fetching_value':
-            finalCardData = { marketValue: await getCardMarketValue(cardToProcess) };
-            finalStatus = 'reviewed' as const;
-            break;
+          finalCardData = { marketValue: await getCardMarketValue(cardToProcess) };
+          finalStatus = 'reviewed';
+          break;
         default:
           processingCards.current.delete(cardToProcess.id);
           return;
       }
-      
       setCards(current => {
         const updated = current.map(c => c.id === cardToProcess.id ? { ...c, ...finalCardData, status: finalStatus, isSynced: false } : c);
         saveCollectionToDrive(updated);
         return updated;
       });
     } catch (err: any) {
-      if (err.message === "API_KEY_MISSING") handleOpenKeySelector();
+      if (err.message === "API_KEY_MISSING") setShowApiKeyModal(true);
       setCards(current => {
         const updated = current.map(c => c.id === cardToProcess.id ? { ...c, status: 'grading_failed' as const, errorMessage: err.message } : c);
         saveCollectionToDrive(updated);
@@ -192,10 +150,10 @@ const App: React.FC = () => {
     } finally {
       processingCards.current.delete(cardToProcess.id);
     }
-  }, [saveCollectionToDrive, handleOpenKeySelector]);
+  }, [saveCollectionToDrive]);
 
   useEffect(() => {
-    const queue = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status) && !processingCards.current.has(c.id));
+    const queue = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'fetching_value'].includes(c.status) && !processingCards.current.has(c.id));
     if (queue.length > 0 && processingCards.current.size < CONCURRENCY_LIMIT) {
       queue.slice(0, CONCURRENCY_LIMIT - processingCards.current.size).forEach(c => processCardInBackground(c));
     }
@@ -214,61 +172,61 @@ const App: React.FC = () => {
     <div className="min-h-screen font-sans flex flex-col items-center p-4">
         <header className="w-full max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center p-4 gap-4">
             <div className="flex items-center gap-4">
-              <img src="https://mcusercontent.com/d7331d7f90c4b088699bd7282/images/98cb8f09-7621-798a-803a-26d394c7b10f.png" alt="MARC AI Grader Logo" className="h-10 w-auto" />
-              <button 
-                onClick={handleOpenKeySelector} 
-                className={`p-2 flex items-center gap-2 px-3 rounded-full transition shadow-sm border ${hasApiKey ? 'bg-green-50 border-green-200 text-green-700' : 'bg-slate-100 border-slate-200 text-slate-600'}`}
-              >
-                <KeyIcon className="w-5 h-5" />
-                <span className="text-xs font-bold">{hasApiKey ? 'API Active' : 'Setup API'}</span>
-              </button>
+              <img src="https://mcusercontent.com/d7331d7f90c4b088699bd7282/images/98cb8f09-7621-798a-803a-26d394c7b10f.png" alt="Logo" className="h-10 w-auto" />
+              {isAdminMode && (
+                <div className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded border border-amber-200 flex items-center gap-1">
+                  <GavelIcon className="w-3 h-3" /> ADMIN
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                {user && (
-                  <button onClick={() => setView(view === 'history' ? 'scanner' : 'history')} className="flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300">
-                    <HistoryIcon className="h-5 w-5" />
-                    <span className="hidden sm:inline">{view === 'history' ? 'Scanner' : `Collection (${cards.length})`}</span>
-                  </button>
-                )}
-                <Auth user={user} onSignOut={signOut} isAuthReady={isAuthReady} />
-              </div>
+            <div className="flex items-center gap-2">
+              {user && (
+                <button onClick={() => setView(view === 'history' ? 'scanner' : 'history')} className="flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300">
+                  <HistoryIcon className="h-5 w-5" />
+                  <span className="hidden sm:inline">{isAdminMode ? 'Master Hub' : 'My Collection'}</span>
+                </button>
+              )}
+              <Auth user={user} onSignOut={signOut} isAuthReady={isAuthReady} />
             </div>
         </header>
-        <main className="w-full flex-grow flex flex-col justify-center items-center">
+        <main className="w-full flex-grow flex flex-col items-center">
             {view === 'history' ? (
                 <CardHistory 
                   cards={cards} 
                   onBack={() => setView('scanner')} 
-                  onDelete={id => setCards(cur => { const upd = cur.filter(c => c.id !== id); saveCollectionToDrive(upd); return upd; })} 
+                  onDelete={id => setCards(cur => cur.filter(c => c.id !== id))} 
                   getAccessToken={() => getAccessToken(false)} 
                   onCardsSynced={c => setCards(cur => cur.map(card => c.some(s => s.id === card.id) ? { ...card, isSynced: true } : card))}
                   onChallengeGrade={(c, d) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'challenging', challengeDirection: d } : x))}
-                  onResync={async (c) => {}}
+                  onResync={async () => {}}
                   onRetryGrading={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'grading', errorMessage: undefined } : x))}
                   onRewriteAllAnalyses={async () => {}}
                   resetRewriteState={() => {}}
-                  isRewriting={isRewriting} rewriteProgress={rewriteProgress} rewrittenCount={rewrittenCount} rewriteFailCount={rewriteFailCount} rewriteStatusMessage={rewriteStatusMessage}
+                  isRewriting={false} rewriteProgress={0} rewrittenCount={0} rewriteFailCount={0} rewriteStatusMessage={''}
                   onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'fetching_value' } : c))}
                   onManualGrade={(c, g, n) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n } : x))}
-                  onLoadCollection={() => handleSyncWithDrive(false)} 
+                  onLoadCollection={() => refreshCollection(false)} 
                   onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value' } : x))}
+                  isAdminView={isAdminMode}
+                  onToggleAdmin={handleToggleAdmin}
+                  onMigrate={handleMigration}
+                  userName={user?.name || 'Anonymous'}
                 />
             ) : (
                 <CardScanner 
                   onRatingRequest={handleRatingRequest} 
-                  isGrading={false} // Global status managed by cards list
+                  isGrading={false} 
                   gradingStatus={''} 
                   isLoggedIn={!!user}
                   hasCards={cards.length > 0}
-                  onSyncDrive={() => handleSyncWithDrive(false)}
+                  onSyncDrive={() => refreshCollection(false)}
                   isSyncing={syncStatus === 'loading'}
                 />
             )}
             
             {showApiKeyModal && (
               <ApiKeyModal 
-                onSave={handleSaveManualKey}
+                onSave={key => { localStorage.setItem(MANUAL_API_KEY_STORAGE, key); setHasApiKey(true); setShowApiKeyModal(false); }}
                 onClose={() => setShowApiKeyModal(false)}
               />
             )}
