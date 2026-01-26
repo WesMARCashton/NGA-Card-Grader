@@ -56,15 +56,17 @@ const App: React.FC = () => {
       lastSavedCardsRef.current = JSON.stringify(loadedCards || []);
     } catch (err: any) {
       console.error("Refresh collection failed:", err);
-      setSyncStatus('error');
+      // Don't stay in loading state if silent sync fails
+      setSyncStatus(silent ? 'idle' : 'error');
     }
   }, [user, getAccessToken]);
 
   useEffect(() => {
     if (user && isAuthReady) {
+      // Trigger silent sync once auth is ready
       refreshCollection(true);
     }
-  }, [user, isAuthReady]);
+  }, [user, isAuthReady, refreshCollection]);
 
   // Periodic persistence to Drive
   useEffect(() => {
@@ -125,6 +127,7 @@ const App: React.FC = () => {
         c.id === cardToProcess.id ? { ...c, ...finalCardData, status: finalStatus, isSynced: false } : c
       ));
     } catch (err: any) {
+      console.error(`Error processing card ${cardToProcess.id}:`, err);
       if (err.message === "API_KEY_MISSING") setShowApiKeyModal(true);
       setCards(current => current.map(c => 
         c.id === cardToProcess.id ? { ...c, status: 'grading_failed' as const, errorMessage: err.message } : c
@@ -156,8 +159,9 @@ const App: React.FC = () => {
       status: 'grading' 
     };
     
-    setCards(current => [newCard, ...current]);
+    // Switch to history immediately to show the user that something is happening
     setView('history');
+    setCards(current => [newCard, ...current]);
   }, []);
 
   // Scanner should only be blocked by primary grading tasks, not price fetching

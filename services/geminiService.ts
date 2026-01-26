@@ -254,9 +254,8 @@ export const getCardMarketValue = async (card: CardData): Promise<MarketValue> =
     const ai = getAIClient();
     const query = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} Grade ${card.overallGrade}`;
     
-    // Optimized prompt for latency: direct and concise.
-    const prompt = `QUICK SEARCH: Find the current market value range for this specific sports card based on recent sold listings: "${query}". 
-    Return strictly JSON: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": "USD", "notes": "brief source summary" }.`;
+    // ULTRA-FAST PROMPT: Minimum instructions for fastest inference.
+    const prompt = `SEARCH: market value of "${query}". JSON only: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": "USD", "notes": "source summary" }.`;
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
@@ -266,7 +265,6 @@ export const getCardMarketValue = async (card: CardData): Promise<MarketValue> =
               safetySettings,
               tools: [{ googleSearch: {} }], 
               temperature: 0.1,
-              // Disable thinking to minimize latency for this direct search task.
               thinkingConfig: { thinkingBudget: 0 }
             }
         }),
