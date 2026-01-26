@@ -12,7 +12,7 @@ import {
   getCardMarketValue
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
-import { HistoryIcon, KeyIcon, SpinnerIcon } from './components/icons';
+import { HistoryIcon, SpinnerIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
 import { ApiKeyModal } from './components/ApiKeyModal';
 
@@ -38,13 +38,12 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  const [hasApiKey, setHasApiKey] = useState(!!localStorage.getItem(MANUAL_API_KEY_STORAGE) || !!process.env.API_KEY);
 
   const processingCards = useRef(new Set<string>());
   const lastSavedCardsRef = useRef<string>('');
   const CONCURRENCY_LIMIT = 2;
 
-  // 1. Fetch collection on mount
+  // Initial load from Drive
   const refreshCollection = useCallback(async (silent: boolean = false) => {
     if (!user || !getAccessToken) return;
     setSyncStatus('loading');
@@ -67,29 +66,29 @@ const App: React.FC = () => {
     }
   }, [user, isAuthReady]);
 
-  // 2. Persist collection to Drive whenever cards change (and processing finishes)
+  // Periodic persistence to Drive
   useEffect(() => {
     const saveTimeout = setTimeout(async () => {
-      const isStillProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary', 'fetching_value'].includes(c.status));
+      // Don't auto-save if something is actively grading to avoid write conflicts
+      const criticalProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary'].includes(c.status));
       const currentCardsStr = JSON.stringify(cards);
       
-      // Only save if data actually changed and we aren't in the middle of a high-frequency update
-      if (user && getAccessToken && !isStillProcessing && currentCardsStr !== lastSavedCardsRef.current) {
+      if (user && getAccessToken && !criticalProcessing && currentCardsStr !== lastSavedCardsRef.current) {
         try {
           const token = await getAccessToken(true);
           const newFileId = await saveCollection(token, driveFileId, cards);
           setDriveFileId(newFileId);
           lastSavedCardsRef.current = currentCardsStr;
         } catch (err) {
-          console.error("Auto-save to Drive failed:", err);
+          console.error("Auto-save failed:", err);
         }
       }
-    }, 2000); // 2 second debounce
+    }, 3000);
 
     return () => clearTimeout(saveTimeout);
   }, [cards, user, getAccessToken, driveFileId]);
 
-  // 3. Background Processing Logic
+  // Task Processor
   const processCardInBackground = useCallback(async (cardToProcess: CardData) => {
     if (processingCards.current.has(cardToProcess.id)) return;
     processingCards.current.add(cardToProcess.id);
@@ -158,11 +157,11 @@ const App: React.FC = () => {
     };
     
     setCards(current => [newCard, ...current]);
-    // Switch to history view immediately so user sees progress
     setView('history');
   }, []);
 
-  const isAnyCardGrading = cards.some(c => ['grading', 'challenging', 'regenerating_summary'].includes(c.status));
+  // Scanner should only be blocked by primary grading tasks, not price fetching
+  const isBlockingProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary'].includes(c.status));
 
   return (
     <div className="min-h-screen font-sans flex flex-col items-center p-4">
@@ -203,8 +202,8 @@ const App: React.FC = () => {
             ) : (
                 <CardScanner 
                   onRatingRequest={handleRatingRequest} 
-                  isGrading={isAnyCardGrading} 
-                  gradingStatus={isAnyCardGrading ? 'Processing queue...' : ''} 
+                  isGrading={isBlockingProcessing} 
+                  gradingStatus={isBlockingProcessing ? 'Grading card...' : ''} 
                   isLoggedIn={!!user}
                   hasCards={cards.length > 0}
                   onSyncDrive={() => refreshCollection(false)}
@@ -214,7 +213,7 @@ const App: React.FC = () => {
             
             {showApiKeyModal && (
               <ApiKeyModal 
-                onSave={key => { localStorage.setItem(MANUAL_API_KEY_STORAGE, key); setHasApiKey(true); setShowApiKeyModal(false); }}
+                onSave={key => { localStorage.setItem(MANUAL_API_KEY_STORAGE, key); setShowApiKeyModal(false); window.location.reload(); }}
                 onClose={() => setShowApiKeyModal(false)}
               />
             )}

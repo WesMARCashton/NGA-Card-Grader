@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { CardData } from '../types';
 import { ExportIcon, BackIcon, TrashIcon, GoogleSheetIcon, ResyncIcon, SpinnerIcon, CheckIcon, CogIcon } from './icons';
 import { CardDetailModal } from './CardDetailModal';
@@ -31,22 +31,23 @@ interface CardHistoryProps {
 }
 
 const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => void; }> = ({ card, onSelect, onDelete }) => {
-  const isProcessing = ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(card.status);
+  const isBlocking = ['grading', 'challenging', 'regenerating_summary'].includes(card.status);
   
   const getStatusIndicator = () => {
     switch (card.status) {
         case 'grading': return <div className="text-sm font-semibold text-blue-600">Grading...</div>;
         case 'challenging': return <div className="text-sm font-semibold text-yellow-600">Challenging...</div>;
-        case 'needs_review': return <div className="text-sm font-bold text-green-600">Review</div>;
+        case 'needs_review': return <div className="text-sm font-bold text-green-600">Review Now</div>;
         case 'grading_failed': return <div className="text-sm font-semibold text-red-600">Failed</div>;
+        case 'fetching_value': return <div className="text-sm font-semibold text-green-600 animate-pulse">Pricing...</div>;
         default: return <p className="text-sm font-semibold text-slate-600">{card.gradeName || 'Grades'}</p>;
     }
   };
 
   return (
     <div 
-      className={`bg-white p-4 rounded-lg flex items-center gap-4 shadow-lg transition-all duration-300 ${isProcessing ? 'opacity-70' : 'cursor-pointer hover:shadow-xl hover:scale-[1.01]'}`}
-      onClick={!isProcessing ? onSelect : undefined}
+      className={`bg-white p-4 rounded-lg flex items-center gap-4 shadow-lg transition-all duration-300 ${isBlocking ? 'opacity-70 pointer-events-none' : 'cursor-pointer hover:shadow-xl hover:scale-[1.01]'}`}
+      onClick={onSelect}
     >
       <img src={ensureDataUrl(card.frontImage)} alt="Card" className="w-16 h-22 object-contain rounded-md bg-slate-100"/>
       <div className="flex-grow">
@@ -71,9 +72,10 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [customSyncList, setCustomSyncList] = useState<CardData[] | null>(null);
 
-  const collectionCards = props.cards.filter(c => c.status === 'reviewed');
+  // CRITICAL FIX: Include 'fetching_value' in collection list so they don't disappear
+  const collectionCards = props.cards.filter(c => ['reviewed', 'fetching_value'].includes(c.status));
   const unsyncedCards = collectionCards.filter(c => !c.isSynced);
-  const needsReviewCards = props.cards.filter(c => c.status === 'needs_review' || c.status === 'grading_failed');
+  const needsReviewCards = props.cards.filter(c => ['needs_review', 'grading_failed', 'grading', 'challenging'].includes(c.status));
 
   const handleResyncAll = () => {
     if (collectionCards.length === 0) return;
@@ -81,35 +83,16 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
     setIsSyncModalOpen(true);
   };
 
-  const exportToCsv = () => {
-    const cardsToExport = props.cards.filter(c => c.status === 'reviewed');
-    if (cardsToExport.length === 0) return;
-    const headers = ['Name', 'Set', 'Year', 'Number', 'Grade', 'Mint Name'];
-    const rows = cardsToExport.map(c => [c.name, c.set, c.year, c.cardNumber, c.overallGrade, c.gradeName].join(','));
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
-    const link = document.createElement("a");
-    link.setAttribute("href", encodeURI(csvContent));
-    link.setAttribute("download", "collection.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-  
   return (
-    <div className="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6">
+    <div className="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6 animate-fade-in">
         <div className="flex justify-between items-center">
             <button onClick={props.onBack} className="flex items-center gap-2 text-blue-600 font-bold hover:text-blue-500 transition">
-                <BackIcon className="w-5 h-5" /> Back to Scanner
+                <BackIcon className="w-5 h-5" /> Back
             </button>
             <h1 className="text-2xl font-bold">My Collection</h1>
-            <div className="flex gap-2">
-                <button onClick={exportToCsv} className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition" title="Export CSV">
-                    <ExportIcon className="w-5 h-5" />
-                </button>
-                <button onClick={() => setIsSheetSettingsOpen(true)} className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition">
-                    <CogIcon className="w-5 h-5" />
-                </button>
-            </div>
+            <button onClick={() => setIsSheetSettingsOpen(true)} className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition">
+                <CogIcon className="w-5 h-5" />
+            </button>
         </div>
 
         <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -117,33 +100,25 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
                 <div className="bg-green-100 p-2 rounded-lg"><GoogleSheetIcon className="w-6 h-6" /></div>
                 <div>
                     <p className="text-sm font-bold">Google Sheets Sync</p>
-                    <p className="text-xs text-slate-500">{unsyncedCards.length} cards pending</p>
+                    <p className="text-xs text-slate-500">{unsyncedCards.length} pending</p>
                 </div>
             </div>
-            <div className="flex gap-2 w-full sm:w-auto">
-                <button 
-                    onClick={handleResyncAll}
-                    disabled={collectionCards.length === 0}
-                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50"
-                >
+            <div className="flex gap-2">
+                <button onClick={handleResyncAll} className="flex items-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50">
                     <ResyncIcon className="w-5 h-5" />
-                    <span>Resync All</span>
+                    <span className="hidden sm:inline">Resync All</span>
                 </button>
-                <button 
-                    onClick={() => setIsSyncModalOpen(true)}
-                    disabled={unsyncedCards.length === 0}
-                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 py-2 px-6 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition disabled:opacity-50"
-                >
+                <button onClick={() => setIsSyncModalOpen(true)} disabled={unsyncedCards.length === 0} className="flex items-center gap-2 py-2 px-6 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition disabled:opacity-50">
                     <CheckIcon className="w-5 h-5" />
-                    <span>Sync Unsynced</span>
+                    <span>Sync</span>
                 </button>
             </div>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-8">
             {needsReviewCards.length > 0 && (
                 <div className="space-y-3">
-                    <h2 className="text-lg font-bold text-green-700">Pending Review</h2>
+                    <h2 className="text-lg font-bold text-blue-700">In Progress / Pending</h2>
                     {needsReviewCards.map(c => (
                         <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
                     ))}
@@ -154,9 +129,9 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
                 <h2 className="text-lg font-bold text-slate-800">Collection ({collectionCards.length})</h2>
                 {props.cards.length === 0 ? (
                     <div className="py-20 text-center text-slate-400 border-2 border-dashed rounded-xl bg-slate-50">
-                        <p className="mb-4">No cards in your collection.</p>
+                        <p className="mb-4">No cards found.</p>
                         {props.onLoadCollection && (
-                             <button onClick={props.onLoadCollection} className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold">Load from Drive</button>
+                             <button onClick={props.onLoadCollection} className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">Load from Drive</button>
                         )}
                     </div>
                 ) : (
@@ -175,15 +150,12 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
                 onAcceptGrade={props.onAcceptGrade}
                 onDelete={props.onDelete}
                 onManualGrade={props.onManualGrade}
+                onRetryGrading={props.onRetryGrading}
                 onGetMarketValue={props.onGetMarketValue}
             />
         )}
 
-        {isSheetSettingsOpen && (
-            <SheetSettingsModal 
-                onClose={() => setIsSheetSettingsOpen(false)} 
-            />
-        )}
+        {isSheetSettingsOpen && <SheetSettingsModal onClose={() => setIsSheetSettingsOpen(false)} />}
 
         {isSyncModalOpen && (
             <SyncSheetModal 

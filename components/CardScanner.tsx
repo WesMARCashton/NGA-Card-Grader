@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useCallback, ChangeEvent, useEffect } from 'react';
 import { useCamera } from '../hooks/useCamera';
 import { fileToDataUrl } from '../utils/fileUtils';
@@ -46,7 +47,6 @@ export const CardScanner: React.FC<CardScannerProps> = ({
     return () => clearTimeout(timer);
   }, [confirmation]);
 
-
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>, side: TargetSide) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
@@ -88,7 +88,7 @@ export const CardScanner: React.FC<CardScannerProps> = ({
       onRatingRequest(frontImage, backImage);
       setFrontImage(null);
       setBackImage(null);
-      setConfirmation('Card sent to grading queue!');
+      setConfirmation('Card added to collection!');
     }
   };
   
@@ -110,17 +110,17 @@ export const CardScanner: React.FC<CardScannerProps> = ({
   );
 
   return (
-    <div className="w-full max-w-md mx-auto p-4 md:p-6 space-y-6">
+    <div className="w-full max-w-md mx-auto p-4 md:p-6 space-y-6 animate-fade-in">
       {isLoggedIn && !hasCards && (
-        <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl text-center space-y-3 animate-fade-in shadow-sm">
-           <p className="text-sm text-blue-800 font-medium">Your collection is empty locally.</p>
+        <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl text-center space-y-3 shadow-sm">
+           <p className="text-sm text-blue-800 font-medium italic">Collection not loaded.</p>
            <button 
               onClick={onSyncDrive}
               disabled={isSyncing}
               className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all shadow-md disabled:opacity-50"
            >
               {isSyncing ? <SpinnerIcon className="w-5 h-5" /> : <ResyncIcon className="w-5 h-5" />}
-              {isSyncing ? 'Syncing...' : 'Load from Google Drive'}
+              {isSyncing ? 'Syncing...' : 'Load from Drive'}
            </button>
         </div>
       )}
@@ -133,28 +133,26 @@ export const CardScanner: React.FC<CardScannerProps> = ({
       {!stream && (
         <button
           onClick={handleStartCamera}
-          className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition-transform transform hover:scale-105 border border-slate-300"
+          className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition-transform transform hover:scale-[1.02] border border-slate-300"
         >
-          <CameraIcon className="h-6 w-6" />
+          <CameraIcon className="h-6 w-6 text-blue-500" />
           <span>Scan with Camera</span>
         </button>
       )}
 
       {stream && (
         <div className="space-y-4">
-            <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
+            <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden border-2 border-slate-800 shadow-xl">
                 <video ref={videoRef} autoPlay playsInline className="w-full h-full object-contain"></video>
-                <div className="absolute inset-0 border-4 border-blue-500/50 rounded-lg pointer-events-none" style={{
-                    clipPath: 'polygon(0% 0%, 0% 100%, 5% 100%, 5% 5%, 95% 5%, 95% 95%, 5% 95%, 5% 100%, 100% 100%, 100% 0%)'
-                }}></div>
+                <div className="absolute inset-0 border-4 border-blue-500/30 rounded-lg pointer-events-none"></div>
             </div>
-            {cameraError && <p className="text-red-500 text-center">{cameraError}</p>}
-            <p className="text-center font-medium text-blue-600">Capturing {cameraTarget} of the card</p>
+            {cameraError && <p className="text-red-500 text-center text-sm">{cameraError}</p>}
+            <p className="text-center font-bold text-blue-600 animate-pulse">Position {cameraTarget} of card</p>
             <div className="flex gap-4">
-                <button onClick={handleCapture} className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-transform transform hover:scale-105">
-                    Capture {cameraTarget === 'front' ? 'Front' : 'Back'}
+                <button onClick={handleCapture} className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg">
+                    Capture {cameraTarget}
                 </button>
-                <button onClick={handleSwitchToUpload} className="py-3 px-4 bg-slate-500 hover:bg-slate-600 text-white font-bold rounded-lg transition-transform transform hover:scale-105">
+                <button onClick={handleSwitchToUpload} className="py-3 px-4 bg-slate-500 hover:bg-slate-600 text-white font-bold rounded-lg shadow-md">
                     Cancel
                 </button>
             </div>
@@ -163,24 +161,25 @@ export const CardScanner: React.FC<CardScannerProps> = ({
       
       <div className="space-y-4 pt-4">
         {confirmation && (
-          <div className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-green-100 text-green-800 font-semibold rounded-lg text-center animate-fade-in">
+          <div className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-green-100 text-green-800 font-bold rounded-lg text-center animate-bounce shadow-sm">
             <CheckIcon className="w-6 h-6" />
             <span>{confirmation}</span>
           </div>
         )}
-        <p className="text-center text-sm font-medium text-slate-600">All cards are graded using the NGA standard.</p>
+        
         <button
           onClick={handleGetRating}
           disabled={!frontImage || !backImage || isGrading}
-          className="w-full py-4 px-4 bg-gradient-to-r from-[#3e85c7] to-[#ffcb05] text-white text-lg font-bold rounded-lg shadow-lg transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex items-center justify-center gap-3"
+          className="w-full py-4 px-4 bg-gradient-to-r from-[#3e85c7] to-[#ffcb05] text-white text-lg font-bold rounded-lg shadow-lg transition-all transform hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex items-center justify-center gap-3"
         >
           {isGrading ? (
             <>
-              <SpinnerIcon className="w-6 h-6 flex-shrink-0" />
-              <span className="min-w-0 text-center break-words">{gradingStatus || 'Grading...'}</span>
+              <SpinnerIcon className="w-6 h-6" />
+              <span>{gradingStatus || 'Processing...'}</span>
             </>
-          ) : 'Add to Grading Queue'}
+          ) : 'Identify & Grade Card'}
         </button>
+        <p className="text-center text-[10px] text-slate-400 uppercase tracking-widest font-bold">Standard NGA Grading Applied</p>
       </div>
     </div>
   );
