@@ -4,8 +4,17 @@ import { CardData, EvaluationDetails, SubGradeDetail } from '../types';
 const SHEETS_API_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
 
 const SHEET_HEADERS = [
-    'YEAR', 'COMPANY', 'SERIES', 'NAME', 'EDITION', 'SET', 'NUMBER', 'MINT', 'GRADE',
-    'SCANNED BY', 'DATE', 
+    'YEAR', 
+    'COMPANY', 
+    'SERIES', 
+    'NAME', 
+    'EDITION', 
+    'SET', 
+    'CARD_NUMBER', 
+    'MINT_LABEL', 
+    'GRADE',
+    '', // Column J: Empty as requested
+    '', // Column K: Empty as requested
     'CENTERING GRADE', 'CENTERING NOTES',
     'CORNERS GRADE', 'CORNERS NOTES',
     'EDGES GRADE', 'EDGES NOTES',
@@ -35,13 +44,21 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
     const checkData = await checkResponse.json();
     const needsHeaders = !checkData.values || checkData.values.length === 0;
 
-    // Explicitly type as any[][] to accommodate mixed string and number values from card details
     const rowsToAppend: any[][] = needsHeaders ? [SHEET_HEADERS] : [];
     const newRows = cardsToSync.map(card => {
         const d = card.details;
         return [
-            card.year || '', card.company || '', card.team || '', card.name || '', card.edition || '', card.set || '', card.cardNumber || '', card.gradeName || '', card.overallGrade,
-            userName, new Date(card.timestamp).toLocaleDateString(),
+            card.year || '', 
+            card.company || '', 
+            card.team || '', 
+            card.name || '', 
+            card.edition || '', 
+            card.set || '', 
+            card.cardNumber || '', 
+            card.gradeName || '', 
+            card.overallGrade,
+            '', // Column J: empty
+            '', // Column K: empty
             d?.centering?.grade, d?.centering?.notes,
             d?.corners?.grade, d?.corners?.notes,
             d?.edges?.grade, d?.edges?.notes,
@@ -60,7 +77,7 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
 };
 
 /**
- * Fetches data from the Master Sheet and reconstructs CardData objects for the Admin.
+ * Fetches data from the Master Sheet and reconstructs CardData objects.
  */
 export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string): Promise<CardData[]> => {
     const spreadsheetId = getSheetIdFromUrl(sheetUrl);
@@ -74,7 +91,6 @@ export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string)
     const data = await response.json();
     if (!data.values || data.values.length <= 1) return [];
 
-    const headers = data.values[0];
     return data.values.slice(1).map((row: any[], index: number) => {
         const details: EvaluationDetails = {
             centering: { grade: parseFloat(row[11]), notes: row[12] },
@@ -96,13 +112,13 @@ export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string)
             cardNumber: row[6],
             gradeName: row[7],
             overallGrade: parseFloat(row[8]),
-            scannedBy: row[9],
+            scannedBy: row[9] || 'Sheet Import',
             timestamp: row[10] ? new Date(row[10]).getTime() : Date.now(),
             details,
             summary: row[21],
             gradingSystem: 'NGA',
             isSynced: true,
-            frontImage: '', // Sheet doesn't store images for bandwidth, admin uses sheet context
+            frontImage: '', 
             backImage: ''
         };
     });
