@@ -90,8 +90,9 @@ export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string)
     if (!sheetMetaData.sheets || sheetMetaData.sheets.length === 0) throw new Error("No sheets found in spreadsheet.");
     const firstSheetName = sheetMetaData.sheets[0].properties.title;
 
-    // Fetch full range to ensure no truncation
-    const response = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/'${encodeURIComponent(firstSheetName)}'!A:V`, {
+    // Fetch full range to ensure no truncation. 
+    // We use a safe large number if Column A is sparse, but A:V usually works best.
+    const response = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/'${encodeURIComponent(firstSheetName)}'!A1:V5000`, {
         headers: { 'Authorization': `Bearer ${accessToken}` },
     });
     if (!response.ok) throw new Error("Could not load Master Sheet data.");
@@ -99,10 +100,10 @@ export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string)
     const data = await response.json();
     if (!data.values || data.values.length <= 1) return [];
 
-    // Filter out rows that are entirely empty. 
-    // We check columns A, B, C, D (Year, Company, Team, Name) - if all are empty, we skip the row.
+    const now = Date.now();
+
     return data.values.slice(1)
-        .filter((row: any[]) => row.length > 0 && (row[0] || row[1] || row[3]))
+        .filter((row: any[]) => row.length > 0 && row.some(cell => cell && cell.toString().trim() !== ''))
         .map((row: any[], index: number) => {
             const details: EvaluationDetails = {
                 centering: { grade: parseFloat(row[11]) || 0, notes: row[12] || '' },
@@ -117,8 +118,8 @@ export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string)
             const year = row[0] || 'N/A';
 
             return {
-                // Stable deterministic ID for this specific row entry
-                id: `sheet-${index}-${year}-${name}`.replace(/\s+/g, '-').toLowerCase(),
+                // Highly unique ID to ensure every row is a separate item
+                id: `sheet-${spreadsheetId}-${index}-${now}`,
                 status: 'reviewed',
                 year: year,
                 company: row[1] || '',
@@ -130,8 +131,8 @@ export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string)
                 gradeName: row[7] || '',
                 overallGrade: overallGrade,
                 scannedBy: row[9] || 'Sheet Import',
-                // Stagger timestamps so they sort in the order they appear in the sheet
-                timestamp: Date.now() - (index * 1000), 
+                // Preserve order by staggering timestamps
+                timestamp: now - (index * 1000), 
                 details,
                 summary: row[21] || '',
                 gradingSystem: 'NGA',

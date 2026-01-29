@@ -114,36 +114,23 @@ const App: React.FC = () => {
       const sheetCards = await fetchCardsFromSheet(token, sheetUrl);
       
       if (sheetCards.length === 0) {
-        alert("No valid records found in the spreadsheet.");
+        alert("No records found in the spreadsheet.");
         return;
       }
 
       setCards(prev => {
-        // Build a unique fingerprint for existing cards that HAVE images
-        // Fingerprint includes Grade and Company to prevent collapsing player duplicates
-        const existingFingerprints = new Set(
-          prev
-            .filter(c => c.frontImage || c.backImage)
-            .map(c => `${c.name}|${c.year}|${c.company}|${c.set}|${c.cardNumber}|${c.overallGrade}`.toLowerCase())
-        );
-
-        // Also track IDs to prevent duplicate sheet row imports
+        // We stop using metadata fingerprints to deduplicate.
+        // If a user has 200 cards, and many are "Unknown", fingerprinting hides them.
+        // We only skip if the specific ID already exists in our current set.
         const existingIds = new Set(prev.map(c => c.id));
-
-        const newToMerge = sheetCards.filter(sc => {
-          if (existingIds.has(sc.id)) return false;
-          
-          const fingerprint = `${sc.name}|${sc.year}|${sc.company}|${sc.set}|${sc.cardNumber}|${sc.overallGrade}`.toLowerCase();
-          // If we have an image-based local copy, don't import the imageless sheet row as a duplicate
-          return !existingFingerprints.has(fingerprint);
-        });
+        const newToMerge = sheetCards.filter(sc => !existingIds.has(sc.id));
 
         const combined = [...prev, ...newToMerge];
         // Sort descending by timestamp
         return combined.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       });
       
-      alert(`Sync Complete!\n\nSuccessfully retrieved ${sheetCards.length} rows from the Master Sheet.`);
+      alert(`Sync Complete!\n\nSuccessfully loaded ${sheetCards.length} records from Google Sheets.`);
     } catch (err: any) {
       console.error("Sync from sheet failed:", err);
       alert("Error syncing from sheet: " + err.message);
@@ -159,7 +146,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const saveTimeout = setTimeout(async () => {
-      const criticalProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary'].includes(c.status));
+      const criticalProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status));
       const currentCardsStr = JSON.stringify(cards);
       
       if (user && getAccessToken && !criticalProcessing && currentCardsStr !== lastSavedCardsRef.current) {
@@ -197,6 +184,7 @@ const App: React.FC = () => {
           finalStatus = 'needs_review';
           break;
         case 'regenerating_summary':
+        case 'generating_summary':
           finalCardData = await regenerateCardAnalysisForGrade(f64, b64, cardToProcess, cardToProcess.overallGrade!, cardToProcess.gradeName!, () => {});
           finalStatus = 'reviewed';
           break;
@@ -225,7 +213,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const queue = cards.filter(c => 
-      ['grading', 'challenging', 'regenerating_summary', 'fetching_value'].includes(c.status) && 
+      ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status) && 
       !processingCards.current.has(c.id)
     );
     
@@ -249,7 +237,7 @@ const App: React.FC = () => {
     setCards(current => [newCard, ...current]);
   }, []);
 
-  const isBlockingProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary'].includes(c.status));
+  const isBlockingProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status));
 
   return (
     <div className="min-h-screen font-sans flex flex-col items-center p-4">

@@ -32,7 +32,7 @@ interface CardHistoryProps {
 }
 
 const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => void; }> = ({ card, onSelect, onDelete }) => {
-  const isBlocking = ['grading', 'challenging', 'regenerating_summary'].includes(card.status);
+  const isBlocking = ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(card.status);
   
   const getStatusIndicator = () => {
     switch (card.status) {
@@ -41,6 +41,9 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
         case 'needs_review': return <div className="text-sm font-bold text-green-600">Review Now</div>;
         case 'grading_failed': return <div className="text-sm font-semibold text-red-600">Failed</div>;
         case 'fetching_value': return <div className="text-sm font-semibold text-green-600 animate-pulse">Pricing...</div>;
+        case 'generating_summary':
+        case 'regenerating_summary':
+             return <div className="text-sm font-semibold text-indigo-600 animate-pulse">Analyzing...</div>;
         default: return <p className="text-sm font-semibold text-slate-600">{card.gradeName || 'Grades'}</p>;
     }
   };
@@ -74,16 +77,23 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
   const [customSyncList, setCustomSyncList] = useState<CardData[] | null>(null);
   const [isPullingFromSheet, setIsPullingFromSheet] = useState(false);
 
+  // Status-based filters. We cover every single status to ensure no card is hidden.
   const collectionCards = props.cards.filter(c => ['reviewed', 'fetching_value'].includes(c.status));
-  const unsyncedCards = collectionCards.filter(c => !c.isSynced);
-  const needsReviewCards = props.cards.filter(c => ['needs_review', 'grading_failed', 'grading', 'challenging'].includes(c.status));
+  const needsReviewCards = props.cards.filter(c => ['needs_review', 'grading_failed', 'grading', 'challenging', 'generating_summary', 'regenerating_summary'].includes(c.status));
+  
+  // Safety check: cards that don't match either of the above for some reason
+  const uncategorizedCards = props.cards.filter(c => 
+    !collectionCards.some(x => x.id === c.id) && !needsReviewCards.some(x => x.id === c.id)
+  );
+
+  const unsyncedCards = props.cards.filter(c => !c.isSynced);
 
   const handleResyncAll = () => {
-    if (collectionCards.length === 0) {
-        alert("No graded cards in collection to sync.");
+    if (props.cards.length === 0) {
+        alert("No cards in collection to sync.");
         return;
     }
-    setCustomSyncList(collectionCards);
+    setCustomSyncList(props.cards);
     setIsSyncModalOpen(true);
   };
 
@@ -109,7 +119,7 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
             </button>
             <div className="text-center">
                 <h1 className="text-2xl font-bold">My Collection</h1>
-                <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Total cached items: {props.cards.length}</p>
+                <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Visible: {props.cards.length} | Total Data: {props.cards.length}</p>
             </div>
             <button onClick={() => setIsSheetSettingsOpen(true)} className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition">
                 <CogIcon className="w-5 h-5" />
@@ -135,7 +145,7 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
                 </button>
                 <button 
                   onClick={handleResyncAll} 
-                  disabled={collectionCards.length === 0}
+                  disabled={props.cards.length === 0}
                   className="flex items-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50"
                 >
                     <ResyncIcon className="w-5 h-5" />
@@ -155,7 +165,7 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
         <div className="space-y-8">
             {needsReviewCards.length > 0 && (
                 <div className="space-y-3">
-                    <h2 className="text-lg font-bold text-blue-700">In Progress / Pending</h2>
+                    <h2 className="text-lg font-bold text-blue-700">In Progress / Pending Review</h2>
                     {needsReviewCards.map(c => (
                         <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
                     ))}
@@ -167,13 +177,13 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
                     <h2 className="text-lg font-bold text-slate-800">Collection ({collectionCards.length})</h2>
                     {props.onLoadCollection && (
                         <button onClick={props.onLoadCollection} className="text-xs font-bold text-blue-600 hover:underline">
-                            Refresh from Drive
+                            Force Load from Drive
                         </button>
                     )}
                 </div>
                 {props.cards.length === 0 ? (
                     <div className="py-20 text-center text-slate-400 border-2 border-dashed rounded-xl bg-slate-50">
-                        <p className="mb-4">No cards found in local cache.</p>
+                        <p className="mb-4">No cards found in memory.</p>
                         <div className="flex gap-4 justify-center">
                             <button onClick={props.onLoadCollection} className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">Load from Drive</button>
                             <button onClick={handleSyncFromSheet} className="bg-green-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">Load from Sheet</button>
@@ -185,6 +195,15 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
                     ))
                 )}
             </div>
+
+            {uncategorizedCards.length > 0 && (
+                <div className="space-y-3">
+                    <h2 className="text-lg font-bold text-slate-500 italic">Uncategorized / Debug</h2>
+                    {uncategorizedCards.map(c => (
+                        <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
+                    ))}
+                </div>
+            )}
         </div>
 
         {selectedCard && (
