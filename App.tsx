@@ -19,6 +19,7 @@ import { ApiKeyModal } from './components/ApiKeyModal';
 
 const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
 const SHEET_URL_STORAGE = 'google_sheet_url';
+const LOCAL_CARDS_STORAGE = 'nga_card_collection_local';
 
 if (typeof window !== 'undefined') {
   if (!(window as any).process) (window as any).process = { env: {} };
@@ -86,7 +87,20 @@ const App: React.FC = () => {
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
   
   const [view, setView] = useState<AppView>('scanner');
-  const [cards, setCards] = useState<CardData[]>([]);
+  
+  // Initialize from local storage so cards are visible immediately
+  const [cards, setCards] = useState<CardData[]>(() => {
+    const saved = localStorage.getItem(LOCAL_CARDS_STORAGE);
+    if (saved) {
+      try {
+        return normalizeLoadedCards(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to parse local cards", e);
+      }
+    }
+    return [];
+  });
+
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
@@ -94,6 +108,11 @@ const App: React.FC = () => {
   const processingCards = useRef(new Set<string>());
   const lastSavedCardsRef = useRef<string>('');
   const CONCURRENCY_LIMIT = 2;
+
+  // Persist to local storage whenever cards change
+  useEffect(() => {
+    localStorage.setItem(LOCAL_CARDS_STORAGE, JSON.stringify(cards));
+  }, [cards]);
 
   const refreshCollection = useCallback(async (silent: boolean = false) => {
     if (!user || !getAccessToken) {
@@ -103,35 +122,45 @@ const App: React.FC = () => {
     
     setSyncStatus('loading');
     try {
-      // Get the token first. This might trigger a popup if not silent.
       const token = await getAccessToken(silent);
       const { fileId, cards: loadedCards } = await getCollection(token);
 
-      const normalized = normalizeLoadedCards(loadedCards || []);
-      setCards(normalized);
+      const remoteCards = normalizeLoadedCards(loadedCards || []);
+      
+      setCards(prev => {
+        // Merge strategy: Keep existing local cards, add remote cards that don't exist locally
+        const merged = [...prev];
+        let addedCount = 0;
+        
+        remoteCards.forEach(remote => {
+          if (!merged.find(m => m.id === remote.id)) {
+            merged.push(remote);
+            addedCount++;
+          }
+        });
+
+        const sorted = merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        
+        if (!silent) {
+          if (addedCount > 0) {
+            alert(`Sync Complete! Added ${addedCount} new cards from Google Drive.`);
+          } else if (remoteCards.length > 0) {
+            alert(`Your collection is already up to date with Google Drive.`);
+          } else {
+            alert("Your collection on Google Drive is currently empty. Local cards will be synced to Drive automatically.");
+          }
+        }
+        
+        return sorted;
+      });
+
       setDriveFileId(fileId);
       setSyncStatus('success');
-      lastSavedCardsRef.current = JSON.stringify(normalized);
-      
-      if (!silent) {
-        if (normalized.length > 0) {
-          alert(`Successfully loaded ${normalized.length} cards from Google Drive.`);
-        } else {
-          alert("Your collection on Google Drive is currently empty.");
-        }
-      }
     } catch (err: any) {
       console.error("Refresh collection failed:", err);
       setSyncStatus(silent ? 'idle' : 'error');
-      
-      // Don't alert if silent fails (common on first load or session expiry)
       if (!silent) {
-        const msg = err.message || "Failed to load collection.";
-        if (msg.includes('popup_blocked')) {
-          alert("The login popup was blocked by your browser. Please allow popups for this site and try again.");
-        } else {
-          alert(`Could not load Drive collection: ${msg}`);
-        }
+        alert(`Could not load Drive collection: ${err.message || "Unknown error"}`);
       }
     }
   }, [user, getAccessToken]);
@@ -169,11 +198,11 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (user && isAuthReady) {
-      // Silent refresh on mount/login
       refreshCollection(true);
     }
   }, [user, isAuthReady, refreshCollection]);
 
+  // Auto-save to Google Drive
   useEffect(() => {
     const saveTimeout = setTimeout(async () => {
       const criticalProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status));
@@ -186,10 +215,10 @@ const App: React.FC = () => {
           setDriveFileId(newFileId);
           lastSavedCardsRef.current = currentCardsStr;
         } catch (err) {
-          console.error("Auto-save failed:", err);
+          console.error("Auto-save to Drive failed:", err);
         }
       }
-    }, 5000);
+    }, 10000); // 10s debounce for Drive saves
 
     return () => clearTimeout(saveTimeout);
   }, [cards, user, getAccessToken, driveFileId]);
