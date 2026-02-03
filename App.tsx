@@ -20,6 +20,7 @@ import { ApiKeyModal } from './components/ApiKeyModal';
 const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
 const SHEET_URL_STORAGE = 'google_sheet_url';
 const LOCAL_CARDS_STORAGE = 'nga_card_collection_local';
+const LEGACY_STORAGE_KEYS = ['card_collection', 'cards', 'nga_cards']; // Known old keys
 
 if (typeof window !== 'undefined') {
   if (!(window as any).process) (window as any).process = { env: {} };
@@ -88,17 +89,36 @@ const App: React.FC = () => {
   
   const [view, setView] = useState<AppView>('scanner');
   
-  // Initialize from local storage so cards are visible immediately
+  // Initialize from local storage + search for legacy data
   const [cards, setCards] = useState<CardData[]>(() => {
+    let allCards: any[] = [];
+    
+    // Check main key
     const saved = localStorage.getItem(LOCAL_CARDS_STORAGE);
     if (saved) {
-      try {
-        return normalizeLoadedCards(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse local cards", e);
-      }
+      try { allCards = JSON.parse(saved); } catch (e) {}
     }
-    return [];
+    
+    // Check legacy keys to recover old data
+    LEGACY_STORAGE_KEYS.forEach(key => {
+      const legacy = localStorage.getItem(key);
+      if (legacy) {
+        try {
+          const parsed = JSON.parse(legacy);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(pc => {
+              if (!allCards.find(ac => ac.id === pc.id || (ac.timestamp === pc.timestamp && ac.name === pc.name))) {
+                allCards.push(pc);
+              }
+            });
+            console.log(`Recovered legacy data from ${key}`);
+            // We don't remove it yet to be safe, but migration is happening
+          }
+        } catch (e) {}
+      }
+    });
+
+    return normalizeLoadedCards(allCards);
   });
 
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
@@ -109,7 +129,6 @@ const App: React.FC = () => {
   const lastSavedCardsRef = useRef<string>('');
   const CONCURRENCY_LIMIT = 2;
 
-  // Persist to local storage whenever cards change
   useEffect(() => {
     localStorage.setItem(LOCAL_CARDS_STORAGE, JSON.stringify(cards));
   }, [cards]);
@@ -122,20 +141,30 @@ const App: React.FC = () => {
     
     setSyncStatus('loading');
     try {
+      console.log("[App] Starting deep collection refresh...");
       const token = await getAccessToken(silent);
       const { fileId, cards: loadedCards } = await getCollection(token);
 
       const remoteCards = normalizeLoadedCards(loadedCards || []);
       
       setCards(prev => {
-        // Merge strategy: Keep existing local cards, add remote cards that don't exist locally
         const merged = [...prev];
         let addedCount = 0;
         
         remoteCards.forEach(remote => {
-          if (!merged.find(m => m.id === remote.id)) {
+          // Robust check for existing cards by ID, or approximate match if ID is missing/changed
+          const exists = merged.find(m => 
+            m.id === remote.id || 
+            (m.timestamp === remote.timestamp && m.name === remote.name && m.frontImage === remote.frontImage)
+          );
+
+          if (!exists) {
             merged.push(remote);
             addedCount++;
+          } else {
+            // Update existing card if remote is newer or has more info
+            const idx = merged.indexOf(exists);
+            merged[idx] = { ...exists, ...remote };
           }
         });
 
@@ -143,11 +172,11 @@ const App: React.FC = () => {
         
         if (!silent) {
           if (addedCount > 0) {
-            alert(`Sync Complete! Added ${addedCount} new cards from Google Drive.`);
+            alert(`Sync Successful! Found ${addedCount} cards from previous sessions in your Drive.`);
           } else if (remoteCards.length > 0) {
-            alert(`Your collection is already up to date with Google Drive.`);
+            alert(`Collection synced! All ${remoteCards.length} cards from Drive are now showing.`);
           } else {
-            alert("Your collection on Google Drive is currently empty. Local cards will be synced to Drive automatically.");
+            alert("Search finished. Your Google Drive collection appears to be empty for this account.");
           }
         }
         
@@ -160,7 +189,7 @@ const App: React.FC = () => {
       console.error("Refresh collection failed:", err);
       setSyncStatus(silent ? 'idle' : 'error');
       if (!silent) {
-        alert(`Could not load Drive collection: ${err.message || "Unknown error"}`);
+        alert(`Deep sync failed: ${err.message || "Please check your internet connection."}`);
       }
     }
   }, [user, getAccessToken]);
@@ -202,7 +231,6 @@ const App: React.FC = () => {
     }
   }, [user, isAuthReady, refreshCollection]);
 
-  // Auto-save to Google Drive
   useEffect(() => {
     const saveTimeout = setTimeout(async () => {
       const criticalProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status));
@@ -218,7 +246,7 @@ const App: React.FC = () => {
           console.error("Auto-save to Drive failed:", err);
         }
       }
-    }, 10000); // 10s debounce for Drive saves
+    }, 15000); // 15s debounce
 
     return () => clearTimeout(saveTimeout);
   }, [cards, user, getAccessToken, driveFileId]);

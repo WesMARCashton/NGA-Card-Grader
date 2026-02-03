@@ -44,7 +44,6 @@ export const useGoogleAuth = () => {
   const [tokenClient, setTokenClient] = useState<any>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   
-  // Use a ref to store the current pending token request to avoid stale closures in the GIS callback
   const pendingRequestRef = useRef<TokenRequest | null>(null);
   const cachedTokenRef = useRef<CachedToken | null>(null);
 
@@ -88,7 +87,8 @@ export const useGoogleAuth = () => {
 
       const client = google.accounts.oauth2.initTokenClient({
         client_id: clientId,
-        scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/spreadsheets',
+        // Added drive.file to search root drive for legacy files
+        scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
         callback: (tokenResponse: any) => {
           const req = pendingRequestRef.current;
           if (!req) return;
@@ -125,16 +125,8 @@ export const useGoogleAuth = () => {
   }, []);
 
   const getAccessToken = useCallback((silent: boolean = false): Promise<string> => {
-    // 1. Check Cache
     if (cachedTokenRef.current && Date.now() < cachedTokenRef.current.expiresAt - (5 * 60 * 1000)) {
       return Promise.resolve(cachedTokenRef.current.token);
-    }
-
-    // 2. Prevent overlapping requests
-    if (pendingRequestRef.current) {
-      if (!silent) console.warn("A token request is already in progress.");
-      // If the current request is silent and a non-silent one comes in, we might want to override, 
-      // but for simplicity we'll just wait for the existing one.
     }
 
     return new Promise<string>((resolve, reject) => {
@@ -142,7 +134,7 @@ export const useGoogleAuth = () => {
         return reject(new Error('Google Authentication client is not initialized yet.'));
       }
 
-      const timeoutDuration = silent ? 8000 : 90000; // Increased non-silent timeout for slower user interactions
+      const timeoutDuration = silent ? 8000 : 90000;
       const timeoutId = setTimeout(() => {
         if (pendingRequestRef.current) {
           const err = new Error(silent ? 'Silent authentication failed.' : 'Authentication timed out. Please check if the popup was blocked.');
@@ -154,8 +146,6 @@ export const useGoogleAuth = () => {
       pendingRequestRef.current = { resolve, reject, timeoutId };
 
       try {
-        // 'prompt: none' only works if the user is already signed into Google and has authorized the app.
-        // It's the standard way to do "silent" token refresh in GIS.
         tokenClient.requestAccessToken({
           prompt: silent ? 'none' : 'select_account',
           hint: user?.email || undefined
