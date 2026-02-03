@@ -1,3 +1,4 @@
+
 {
   "name": "ai-card-grader",
   "private": true,
@@ -11,7 +12,6 @@
   },
   "dependencies": {
     "@google/genai": "^1.29.1",
-    "firebase": "^12.8.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "serve": "^14.2.4"
