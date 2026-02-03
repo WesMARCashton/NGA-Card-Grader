@@ -3,7 +3,7 @@ import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
 import { CardHistory } from './components/CardHistory';
 import { Auth } from './components/Auth';
-import { useGoogleAuth } from './hooks/useGoogleAuth';
+import { useFirebaseAuth } from './hooks/useFirebaseAuth';
 import { 
   challengeGrade, 
   regenerateCardAnalysisForGrade,
@@ -102,9 +102,7 @@ const App: React.FC = () => {
   }, []);
   // ---- end iframe auto-resize ----
 
-  const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
-  
-  const [view, setView] = useState<AppView>('scanner');
+  const { user, signIn, signOut, getAccessToken, isAuthReady } = useFirebaseAuth();const [view, setView] = useState<AppView>('scanner');
   const [cards, setCards] = useState<CardData[]>([]);
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -286,7 +284,7 @@ const App: React.FC = () => {
               <span className="hidden sm:inline">My Collection</span>
             </button>
           )}
-          <Auth user={user} onSignOut={signOut} isAuthReady={isAuthReady} />
+          <Auth user={user} onSignIn={signIn} onSignOut={signOut} isAuthReady={isAuthReady} />
         </div>
       </header>
       <main className="w-full flex-grow flex flex-col items-center">
