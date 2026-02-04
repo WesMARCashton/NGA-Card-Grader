@@ -20,7 +20,6 @@ const SHEET_URL_STORAGE = 'google_sheet_url';
 const LOCAL_CARDS_STORAGE = 'nga_card_collection_local';
 const API_KEY_STORAGE_KEY = 'manual_gemini_api_key';
 
-// Initialize API Key from localStorage globally at runtime
 if (typeof window !== 'undefined') {
     const savedKey = localStorage.getItem(API_KEY_STORAGE_KEY);
     if (savedKey) {
@@ -51,7 +50,6 @@ const normalizeCards = (data: any[]): CardData[] => {
 };
 
 const App: React.FC = () => {
-  // Auto-resize for iframe hosting
   useEffect(() => {
     const PARENT_ORIGIN = "https://ngacard.com";
     const sendHeight = () => {
@@ -69,16 +67,11 @@ const App: React.FC = () => {
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
   const [view, setView] = useState<AppView>('scanner');
   
-  // Recursive Data Recovery: Dives deep into local storage to find lost cards
   const [cards, setCards] = useState<CardData[]>(() => {
     const recoveredMap = new Map<string, any>();
-    
     const addToMapRecursive = (data: any) => {
         if (!data) return;
-        
-        // Is this a card object?
         if (typeof data === 'object' && !Array.isArray(data)) {
-            // Check for card signatures
             if (data.frontImage && (data.id || data.name || data.overallGrade !== undefined)) {
                 const key = data.id || `${data.name}-${data.timestamp || Date.now()}`;
                 if (!recoveredMap.has(key)) {
@@ -86,26 +79,19 @@ const App: React.FC = () => {
                     return;
                 }
             }
-            
-            // Search its properties
             Object.values(data).forEach(val => {
-                if (val && typeof val === 'object') {
-                    addToMapRecursive(val);
-                }
+                if (val && typeof val === 'object') addToMapRecursive(val);
             });
         } else if (Array.isArray(data)) {
             data.forEach(item => addToMapRecursive(item));
         }
     };
-
-    // Global Sweep: Check every single key in localStorage
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key) {
         try {
           const val = localStorage.getItem(key);
-          if (val && val.startsWith('[') || val.startsWith('{')) {
-             // Heuristic: If it looks like JSON and contains card data hints
+          if (val && (val.startsWith('[') || val.startsWith('{'))) {
              if (val.includes('frontImage') || val.includes('overallGrade') || val.includes('backImage')) {
                  const parsed = JSON.parse(val);
                  addToMapRecursive(parsed);
@@ -114,9 +100,7 @@ const App: React.FC = () => {
         } catch(e) {}
       }
     }
-    
     const finalCards = Array.from(recoveredMap.values());
-    console.log(`[App] Total cards recovered/loaded: ${finalCards.length}`);
     return normalizeCards(finalCards);
   });
 
@@ -135,7 +119,6 @@ const App: React.FC = () => {
     try {
       const token = await getAccessToken(silent);
       const { fileId, cards: remoteData } = await getCollection(token);
-      
       if (remoteData && remoteData.length > 0) {
           const remoteCards = normalizeCards(remoteData);
           setCards(prev => {
@@ -160,7 +143,6 @@ const App: React.FC = () => {
       } else if (!silent) {
           alert("We couldn't find a collection file on this Google Drive account. Try logging in with the account you used previously.");
       }
-      
       setDriveFileId(fileId);
       setSyncStatus('success');
     } catch (e) {
@@ -221,6 +203,9 @@ const App: React.FC = () => {
       if (e.message === 'API_KEY_MISSING') {
           alert("API Key not found. Please click the 'cog' icon and enter your Gemini API Key.");
           setView('history');
+      } else if (e.message === 'QUOTA_EXHAUSTED') {
+          alert("Quota Exceeded (Error 429).\n\nSince your project is in 'Paid Tier 1', check these two things:\n\n1. Verify your API Key: In Google AI Studio, click 'API Keys' and make sure the key you are using belongs to the 'NGA Card Grader' project.\n\n2. Wait a few minutes: Billing status sometimes takes up to an hour to propagate to the AI models.\n\nTry retrying this card in 15 minutes.");
+          setView('history');
       }
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: e.message } : c));
     } finally { processingCards.current.delete(card.id); }
@@ -244,7 +229,7 @@ const App: React.FC = () => {
           lastSavedRef.current = str;
         } catch(e) {}
       }
-    }, 60000); // Auto-save every minute
+    }, 60000);
     return () => clearTimeout(timer);
   }, [cards, user, getAccessToken, driveFileId]);
 
