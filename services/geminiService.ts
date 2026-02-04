@@ -3,8 +3,6 @@ import { GoogleGenAI, GenerateContentResponse, Type, HarmCategory, HarmBlockThre
 import { CardData, EvaluationDetails, MarketValue } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
 
-const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
-
 const extractJson = (response: GenerateContentResponse): any => {
     const text = response.text;
     if (!text || text.trim().length === 0) {
@@ -87,12 +85,8 @@ LOGIC:
 - Average .25 or .75? Round DOWN to nearest .0 or .5.
 ALWAYS output valid JSON.`;
 
+// Using process.env.API_KEY directly as required by the coding guidelines
 const getAIClient = () => {
-  const storedKey = localStorage.getItem(MANUAL_API_KEY_STORAGE);
-  if (storedKey) {
-    if (!(window as any).process) (window as any).process = { env: {} };
-    (process.env as any).API_KEY = storedKey;
-  }
   const apiKey = process.env.API_KEY;
   if (!apiKey || apiKey === "undefined" || apiKey.length < 10) {
       throw new Error("API_KEY_MISSING");

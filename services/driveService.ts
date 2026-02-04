@@ -3,20 +3,30 @@ import { CardData } from '../types';
 
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API_URL = 'https://www.googleapis.com/upload/drive/v3';
-const FILE_NAME = 'card_collection.json';
 
-// Helper to find the *latest* file in either appDataFolder or root Drive
+// List of filenames used in various previous versions
+const POSSIBLE_FILE_NAMES = [
+  'card_collection.json',
+  'cards.json',
+  'nga_cards.json',
+  'nga_collection.json'
+];
+
+const PREFERRED_FILE_NAME = 'card_collection.json';
+
+// Helper to find the *latest* file among all possible legacy names
 const findFileId = async (accessToken: string): Promise<string | null> => {
-  const q = `name='${FILE_NAME}' and trashed=false`;
+  // Build a query that looks for any of our known filenames
+  const nameQuery = POSSIBLE_FILE_NAMES.map(name => `name='${name}'`).join(' or ');
+  const q = `(${nameQuery}) and trashed=false`;
 
-  // We search in both 'drive' (user root) and 'appDataFolder' to recover legacy files
   const url =
     `${DRIVE_API_URL}/files` +
     `?spaces=drive,appDataFolder` +
     `&fields=files(id,name,modifiedTime)` +
     `&q=${encodeURIComponent(q)}` +
     `&orderBy=modifiedTime desc` +
-    `&pageSize=10`;
+    `&pageSize=20`;
 
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -24,17 +34,19 @@ const findFileId = async (accessToken: string): Promise<string | null> => {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    console.error('Drive API findFileId error:', error);
-    const message = (error as any)?.error?.message || 'Failed to search for collection file.';
-    throw new Error(message);
+    console.error('Drive API search error:', error);
+    return null;
   }
 
   const data = await response.json();
   const files = Array.isArray(data?.files) ? data.files : [];
-  console.log(`[DriveService] Found ${files.length} potential collection files.`);
   
-  // Return the most recently modified one
-  return files.length > 0 ? files[0].id : null;
+  if (files.length > 0) {
+    console.log(`[DriveService] Found ${files.length} potential collection files. Selecting latest: ${files[0].name} (${files[0].id})`);
+    return files[0].id;
+  }
+  
+  return null;
 };
 
 export const getCollection = async (
@@ -42,31 +54,25 @@ export const getCollection = async (
 ): Promise<{ fileId: string | null; cards: CardData[] }> => {
   const fileId = await findFileId(accessToken);
   if (!fileId) {
-    console.log("[DriveService] No existing collection file found in Google Drive.");
+    console.log("[DriveService] No existing collection files found in Google Drive.");
     return { fileId: null, cards: [] };
-  }
-
-  console.log(`[DriveService] Attempting to load collection from file: ${fileId}`);
-  const response = await fetch(`${DRIVE_API_URL}/files/${fileId}?alt=media`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  if (response.status === 404) {
-    return { fileId: null, cards: [] };
-  }
-  
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('Drive API getCollection error:', errorText);
-    throw new Error('Failed to download collection file.');
   }
 
   try {
+    const response = await fetch(`${DRIVE_API_URL}/files/${fileId}?alt=media`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (response.status === 404) return { fileId: null, cards: [] };
+    
+    if (!response.ok) {
+      throw new Error('Failed to download collection file.');
+    }
+
     const cards = await response.json();
-    console.log(`[DriveService] Successfully loaded ${Array.isArray(cards) ? cards.length : 0} cards.`);
     return { fileId, cards: Array.isArray(cards) ? cards : [] };
   } catch (e) {
-    console.error('Error parsing collection JSON:', e);
+    console.error('Error loading collection from Drive:', e);
     return { fileId, cards: [] };
   }
 };
@@ -77,11 +83,10 @@ export const saveCollection = async (
   cards: CardData[]
 ): Promise<string> => {
   const metadata: { name: string; mimeType: string; parents?: string[] } = {
-    name: FILE_NAME,
+    name: PREFERRED_FILE_NAME,
     mimeType: 'application/json',
   };
 
-  // If new, we default to appDataFolder for privacy/cleanliness
   if (!fileId) {
     metadata.parents = ['appDataFolder'];
   }
@@ -103,8 +108,6 @@ export const saveCollection = async (
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    console.error('Drive API save error:', error);
     throw new Error('Failed to save collection to Google Drive.');
   }
 
