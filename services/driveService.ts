@@ -5,84 +5,102 @@ const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API_URL = 'https://www.googleapis.com/upload/drive/v3';
 const FILE_NAME = 'card_collection.json';
 
+// Helper to find the file in appDataFolder or regular Drive (for migration)
 const findFileId = async (accessToken: string): Promise<string | null> => {
-  // Look for any file with the name, even if it's not in AppData
-  const q = `name='${FILE_NAME}' and trashed=false`;
-  const url = `${DRIVE_API_URL}/files?spaces=drive,appDataFolder&fields=files(id,name,modifiedTime)&q=${encodeURIComponent(q)}&orderBy=modifiedTime desc&pageSize=5`;
-
-  try {
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    // First, try appDataFolder
+    const appDataResponse = await fetch(`${DRIVE_API_URL}/files?spaces=appDataFolder&fields=files(id,name)&q=name='${FILE_NAME}' and trashed=false`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
     });
-    if (!response.ok) {
-        console.error('[DriveService] Find failed:', response.status);
-        return null;
+    if (!appDataResponse.ok) {
+        const error = await appDataResponse.json();
+        console.error("Drive API findFileId error:", error);
+        const message = error?.error?.message || 'Failed to search for collection file.';
+        throw new Error(message);
     }
-    const data = await response.json();
-    if (data.files && data.files.length > 0) {
-        console.log('[DriveService] Found collection files:', data.files);
-        return data.files[0].id;
+    const appDataResult = await appDataResponse.json();
+    if (appDataResult.files.length > 0) {
+        return appDataResult.files[0].id;
     }
-    return null;
-  } catch (e) {
-    console.error('Error finding file in Drive:', e);
-    return null;
-  }
+
+    // Fallback: search regular Drive (for migration from old versions)
+    const driveResponse = await fetch(`${DRIVE_API_URL}/files?fields=files(id,name)&q=name='${FILE_NAME}' and trashed=false`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    if (!driveResponse.ok) {
+        return null; // Fail silently on fallback
+    }
+    const driveResult = await driveResponse.json();
+    return driveResult.files.length > 0 ? driveResult.files[0].id : null;
 };
 
-export const getCollection = async (
-  accessToken: string
-): Promise<{ fileId: string | null; cards: CardData[] }> => {
-  const fileId = await findFileId(accessToken);
-  if (!fileId) {
-    console.log('[DriveService] No existing collection file found.');
-    return { fileId: null, cards: [] };
-  }
-
-  try {
-    const response = await fetch(`${DRIVE_API_URL}/files/${fileId}?alt=media`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!response.ok) {
-        console.error('[DriveService] Download failed:', response.status);
+export const getCollection = async (accessToken: string): Promise<{ fileId: string | null, cards: CardData[] }> => {
+    const fileId = await findFileId(accessToken);
+    if (!fileId) {
         return { fileId: null, cards: [] };
     }
-    const cards = await response.json();
-    return { fileId, cards: Array.isArray(cards) ? cards : [] };
-  } catch (e) {
-    console.error('Error downloading collection:', e);
-    return { fileId, cards: [] };
-  }
+
+    const response = await fetch(`${DRIVE_API_URL}/files/${fileId}?alt=media`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+
+    if (response.status === 404) {
+        return { fileId: null, cards: [] }; // File might exist but be empty/deleted
+    }
+    if (!response.ok) {
+        try {
+            const error = await response.json();
+            console.error("Drive API getCollection error:", error);
+            const message = error?.error?.message || 'Failed to download collection file.';
+            throw new Error(message);
+        } catch(e) {
+            console.error("Drive API getCollection error (non-JSON):", await response.text());
+            throw new Error('Failed to download collection file.');
+        }
+    }
+    
+    try {
+        const cards = await response.json();
+        return { fileId, cards: Array.isArray(cards) ? cards : [] };
+    } catch (e) {
+        console.error("Error parsing collection JSON:", e);
+        return { fileId, cards: [] }; // Return empty array if file is corrupted
+    }
 };
 
-export const saveCollection = async (
-  accessToken: string,
-  fileId: string | null,
-  cards: CardData[]
-): Promise<string> => {
-  const metadata: { name: string; mimeType: string; parents?: string[] } = {
-    name: FILE_NAME,
-    mimeType: 'application/json',
-  };
+export const saveCollection = async (accessToken: string, fileId: string | null, cards: CardData[]): Promise<string> => {
+    const metadata: { name: string, mimeType: string, parents?: string[] } = {
+        name: FILE_NAME,
+        mimeType: 'application/json',
+    };
+    
+    // If we are creating a new file, specify appDataFolder as the parent.
+    if (!fileId) {
+        metadata.parents = ['appDataFolder'];
+    }
 
-  // If creating new, prefer AppDataFolder
-  if (!fileId) metadata.parents = ['appDataFolder'];
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', new Blob([JSON.stringify(cards)], { type: 'application/json' }));
 
-  const form = new FormData();
-  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-  form.append('file', new Blob([JSON.stringify(cards)], { type: 'application/json' }));
+    const url = fileId
+        ? `${UPLOAD_API_URL}/files/${fileId}?uploadType=multipart`
+        : `${UPLOAD_API_URL}/files?uploadType=multipart`;
+    
+    const method = fileId ? 'PATCH' : 'POST';
 
-  const url = fileId
-    ? `${UPLOAD_API_URL}/files/${fileId}?uploadType=multipart`
-    : `${UPLOAD_API_URL}/files?uploadType=multipart`;
+    const response = await fetch(url, {
+        method,
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        body: form
+    });
 
-  const response = await fetch(url, {
-    method: fileId ? 'PATCH' : 'POST',
-    headers: { Authorization: `Bearer ${accessToken}` },
-    body: form,
-  });
+    if (!response.ok) {
+        const error = await response.json();
+        console.error("Drive API save error:", error);
+        const message = error?.error?.message || 'Failed to save collection to Google Drive.';
+        throw new Error(message);
+    }
 
-  if (!response.ok) throw new Error('Failed to save to Drive.');
-  const data = await response.json();
-  return data.id;
+    const newFileData = await response.json();
+    return newFileData.id;
 };
