@@ -95,6 +95,13 @@ export const saveCollectionToDrive = async (
       cards: CardData[]
     ): Promise<void> => {
       try {
+
+                // SAFETY: never overwrite Drive with an empty collection
+                if (!cards || cards.length === 0) {
+                            console.warn('[Drive] Refusing to save empty card collection');
+                            return;
+                }
+            
               const fileId = await findFileId(accessToken);
               const fileData = { cards };
               const jsonContent = JSON.stringify(fileData);
