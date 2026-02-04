@@ -69,43 +69,54 @@ const App: React.FC = () => {
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
   const [view, setView] = useState<AppView>('scanner');
   
-  // Exhaustive Data Recovery: Scans EVERYTHING in local storage
+  // Recursive Data Recovery: Dives deep into local storage to find lost cards
   const [cards, setCards] = useState<CardData[]>(() => {
     const recoveredMap = new Map<string, any>();
     
-    // Helper to add unique cards to our recovery map
-    const addToMap = (cardArray: any[]) => {
-        if (!Array.isArray(cardArray)) return;
-        cardArray.forEach(pCard => {
-            if (!pCard || !pCard.frontImage) return;
-            // Create a pseudo-unique key for deduplication if ID is missing
-            const uniqueKey = pCard.id || `${pCard.name}-${pCard.timestamp}`;
-            if (!recoveredMap.has(uniqueKey)) {
-                recoveredMap.set(uniqueKey, pCard);
+    const addToMapRecursive = (data: any) => {
+        if (!data) return;
+        
+        // Is this a card?
+        if (typeof data === 'object' && data.frontImage && (data.id || data.name)) {
+            const key = data.id || `${data.name}-${data.timestamp}`;
+            if (!recoveredMap.has(key)) {
+                recoveredMap.set(key, data);
             }
-        });
+            return;
+        }
+
+        // Is this an array? Check items
+        if (Array.isArray(data)) {
+            data.forEach(item => addToMapRecursive(item));
+            return;
+        }
+
+        // Is this an object? Search its properties
+        if (typeof data === 'object') {
+            Object.values(data).forEach(val => {
+                if (val && typeof val === 'object') {
+                    addToMapRecursive(val);
+                }
+            });
+        }
     };
 
-    // 1. Try primary storage
-    const primary = localStorage.getItem(LOCAL_CARDS_STORAGE);
-    if (primary) try { addToMap(JSON.parse(primary)); } catch(e) {}
-
-    // 2. Global Sweep: Look for ANY key that might contain cards
+    // Global Sweep
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && key !== LOCAL_CARDS_STORAGE) {
+      if (key) {
         try {
           const val = localStorage.getItem(key);
-          if (val && (val.includes('frontImage') || val.includes('overallGrade'))) {
+          if (val && (val.includes('frontImage') || val.includes('overallGrade') || val.includes('card_collection'))) {
             const parsed = JSON.parse(val);
-            addToMap(parsed);
+            addToMapRecursive(parsed);
           }
         } catch(e) {}
       }
     }
     
     const finalCards = Array.from(recoveredMap.values());
-    console.log(`[App] Initialized with ${finalCards.length} cards.`);
+    console.log(`[App] Initialized with ${finalCards.length} recovered cards.`);
     return normalizeCards(finalCards);
   });
 
@@ -125,39 +136,36 @@ const App: React.FC = () => {
       const token = await getAccessToken(silent);
       const { fileId, cards: remoteData } = await getCollection(token);
       
-      // If Drive has data, merge it. If not, don't clear local.
       if (remoteData && remoteData.length > 0) {
           const remoteCards = normalizeCards(remoteData);
           setCards(prev => {
             const merged = [...prev];
             let added = 0;
             remoteCards.forEach(rc => {
-              // Check if already exists in local
               const exists = merged.find(m => m.id === rc.id || (m.name === rc.name && m.frontImage === rc.frontImage));
               if (!exists) { 
                   merged.push(rc); 
                   added++; 
               } else { 
                 const idx = merged.indexOf(exists);
-                // Update local with remote data if remote is potentially newer
                 merged[idx] = { ...exists, ...rc };
               }
             });
             if (!silent) {
-              if (added > 0) alert(`Success! Merged ${added} new cards from Google Drive.`);
-              else alert("Your collection is up to date.");
+              if (added > 0) alert(`Success! Recovered ${added} new cards from your Google Drive.`);
+              else alert("Your collection is already up to date.");
             }
             return merged.sort((a, b) => b.timestamp - a.timestamp);
           });
       } else if (!silent) {
-          alert("No collection data found on Google Drive for this account.");
+          alert("No collection data found on Google Drive for this account.\n\nNote: If you used a different Google account or an older version of this app, your data might be stored elsewhere.");
       }
       
       setDriveFileId(fileId);
       setSyncStatus('success');
     } catch (e) {
       setSyncStatus('error');
-      if (!silent) alert("Sync failed. Please check your internet connection.");
+      if (!silent) alert("Sync failed. Please check your internet connection and Google Drive permissions.");
     }
   }, [user, getAccessToken]);
 
@@ -181,7 +189,7 @@ const App: React.FC = () => {
             addedCount++;
           }
         });
-        alert(`Imported ${addedCount} new records from sheet.`);
+        alert(`Imported ${addedCount} records from your spreadsheet.`);
         return merged.sort((a, b) => b.timestamp - a.timestamp);
       });
     } catch (e: any) { alert("Sheet sync failed: " + e.message); }
@@ -210,9 +218,8 @@ const App: React.FC = () => {
 
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false } : c));
     } catch (e: any) {
-      // If we hit an API key error, show the settings to prompt for one
       if (e.message === 'API_KEY_MISSING') {
-          alert("API Key is missing. Please enter your Gemini API Key in Settings (cog icon).");
+          alert("Grader API Key is required. Please open settings (cog icon) and enter your key.");
           setView('history');
       }
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: e.message } : c));
