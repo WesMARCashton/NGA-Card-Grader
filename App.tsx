@@ -124,31 +124,21 @@ const App: React.FC = () => {
           const remoteCards = normalizeCards(remoteData);
           setCards(prev => {
             const merged = [...prev];
-            let addedCount = 0;
             remoteCards.forEach(rc => {
               const exists = merged.find(m => m.id === rc.id || (m.name === rc.name && m.frontImage === rc.frontImage));
-              if (!exists) { 
-                  merged.push(rc); 
-                  addedCount++; 
-              } else { 
+              if (!exists) merged.push(rc); 
+              else { 
                 const idx = merged.indexOf(exists);
                 merged[idx] = { ...exists, ...rc };
               }
             });
-            if (!silent) {
-              if (addedCount > 0) alert(`Drive Sync Complete: Found ${addedCount} new cards!`);
-              else alert("Your collection is up to date.");
-            }
             return merged.sort((a, b) => b.timestamp - a.timestamp);
           });
-      } else if (!silent) {
-          alert("We couldn't find a collection file on this Google Drive account. Try logging in with the account you used previously.");
       }
       setDriveFileId(fileId);
       setSyncStatus('success');
     } catch (e) {
       setSyncStatus('error');
-      if (!silent) alert("Connection to Google Drive failed. Please try again.");
     }
   }, [user, getAccessToken]);
 
@@ -159,23 +149,20 @@ const App: React.FC = () => {
   const handleSyncFromSheet = useCallback(async () => {
     if (!user || !getAccessToken) return;
     const url = localStorage.getItem(SHEET_URL_STORAGE);
-    if (!url) { alert("Configure your Google Sheet URL in settings first."); return; }
+    if (!url) return;
     try {
       const token = await getAccessToken();
       const sheetCards = await fetchCardsFromSheet(token, url);
       setCards(prev => {
         const merged = [...prev];
-        let addedCount = 0;
         sheetCards.forEach(sc => {
-          if (!merged.find(m => m.id === sc.id || (m.name === sc.name && m.year === sc.year && m.cardNumber === sc.cardNumber))) {
+          if (!merged.find(m => m.id === sc.id || (m.name === sc.name && m.year === sc.year))) {
             merged.push(sc);
-            addedCount++;
           }
         });
-        alert(`Imported ${addedCount} records from your spreadsheet.`);
         return merged.sort((a, b) => b.timestamp - a.timestamp);
       });
-    } catch (e: any) { alert("Sheet sync failed: " + e.message); }
+    } catch (e: any) {}
   }, [user, getAccessToken]);
 
   const processCard = useCallback(async (card: CardData) => {
@@ -202,22 +189,13 @@ const App: React.FC = () => {
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false, errorMessage: undefined } : c));
       setQuotaPause(false); 
     } catch (e: any) {
-      if (e.message === 'API_KEY_MISSING') {
-          alert("API Key not found. Please click the 'cog' icon and enter your Gemini API Key.");
-          setView('history');
-      } else if (e.message === 'BILLING_LINK_REQUIRED' || e.message === 'SEARCH_BILLING_ISSUE') {
-          const msg = e.message === 'SEARCH_BILLING_ISSUE' 
-            ? "Market Value Search failed because of a project billing restriction.\n\nACTION: If you just enabled billing, you MUST create a NEW API Key in Google AI Studio. Old keys often stay stuck on free tier limits for a few hours."
-            : "Quota Exceeded.\n\nYour project is 'Paid Tier 1', but Google is still applying free limits to this API Key.\n\nACTION: Go to AI Studio and create a NEW API Key for this project. This usually fixes the issue immediately.";
-          alert(msg);
-          setQuotaPause(true); 
-          setView('history');
-      } else if (e.message === 'SEARCH_QUOTA_EXHAUSTED') {
-          setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'reviewed', errorMessage: "Search Speed Limit: Try pricing again in 60s." } : c));
+      if (e.message === 'SEARCH_BILLING_ISSUE' || e.message === 'BILLING_LINK_REQUIRED') {
+          // If pricing specifically fails due to billing, mark card as reviewed but note the error
+          setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'reviewed', errorMessage: "Price Search restricted. Billing or Fresh API Key required." } : c));
           setQuotaPause(true);
-          setTimeout(() => setQuotaPause(false), 30000); 
-          return; 
-      } else if (e.message === 'QUOTA_EXHAUSTED') {
+          setView('history');
+          return;
+      } else if (e.message === 'SEARCH_QUOTA_EXHAUSTED' || e.message === 'QUOTA_EXHAUSTED') {
           setQuotaPause(true);
           setTimeout(() => setQuotaPause(false), 30000); 
       }
@@ -268,7 +246,7 @@ const App: React.FC = () => {
             getAccessToken={() => getAccessToken(false)} onCardsSynced={synced => setCards(cur => cur.map(c => synced.some(s => s.id === c.id) ? { ...c, isSynced: true } : c))}
             onChallengeGrade={(c, d) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'challenging', challengeDirection: d } : x))}
             onRetryGrading={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'grading', errorMessage: undefined } : x))}
-            onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'fetching_value' } : c))}
+            onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'fetching_value', errorMessage: undefined } : c))}
             onManualGrade={(c, g, n) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n } : x))}
             onLoadCollection={() => refreshCollection(false)} onSyncFromSheet={handleSyncFromSheet}
             onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value', errorMessage: undefined } : x))}

@@ -19,15 +19,10 @@ const extractJson = (response: GenerateContentResponse): any => {
 
 const getAI = () => {
     let apiKey = process.env.API_KEY;
-    
     if (!apiKey || apiKey === 'undefined' || apiKey === '') {
         apiKey = localStorage.getItem(API_KEY_STORAGE_KEY) || '';
     }
-    
-    if (!apiKey) {
-        throw new Error("API_KEY_MISSING");
-    }
-    
+    if (!apiKey) throw new Error("API_KEY_MISSING");
     return new GoogleGenAI({ apiKey });
 };
 
@@ -35,16 +30,17 @@ const handleApiError = (e: any, context: string = "general") => {
     console.error(`Gemini API Error [${context}]:`, e);
     const errorStr = String(e).toLowerCase();
     
-    // Check for quota/429 specifically
+    // Specific check for 429/Quota
     if (errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("resource_exhausted")) {
-        // If "check your plan" or "billing" is mentioned, it's a specific type of quota error
-        const isBillingRelated = errorStr.includes("check your plan") || errorStr.includes("billing");
+        // Search tool grounding is much stricter about billing projects
+        const billingKeywords = ["billing", "check your plan", "project", "paid"];
+        const isBillingRestricted = billingKeywords.some(k => errorStr.includes(k));
         
         if (context === "market_value") {
-            throw new Error(isBillingRelated ? "SEARCH_BILLING_ISSUE" : "SEARCH_QUOTA_EXHAUSTED");
+            throw new Error(isBillingRestricted ? "SEARCH_BILLING_ISSUE" : "SEARCH_QUOTA_EXHAUSTED");
         }
         
-        if (isBillingRelated) {
+        if (isBillingRestricted) {
             throw new Error("BILLING_LINK_REQUIRED");
         }
         throw new Error("QUOTA_EXHAUSTED");
@@ -54,30 +50,26 @@ const handleApiError = (e: any, context: string = "general") => {
         throw new Error("API_KEY_INVALID");
     }
 
-    throw e;
+    throw new Error(e.message || "Unknown API Error");
 };
 
-const NGA_SYSTEM = `You are a professional NGA sports card grader. You are extremely strict. PSA 10s (Gem Mint) are rare. You analyze centering, corners, edges, and surface. Return your analysis in strict JSON format only.`;
+const NGA_SYSTEM = `You are a professional NGA sports card grader. Strict. PSA 10s are rare. Analysis centering, corners, edges, and surface. Return JSON only.`;
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
     try {
         const ai = getAI();
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-lite-preview',
-            contents: "hi",
+            contents: "Hi",
             config: { maxOutputTokens: 5 }
         });
-        if (response.text) return { success: true, message: "Connection Successful! Your key is active." };
-        return { success: false, message: "Connected but received empty response." };
+        return { success: true, message: "Connection Successful! Your key is communicating with Gemini." };
     } catch (e: any) {
         const err = String(e).toLowerCase();
         if (err.includes("429") || err.includes("quota")) {
-            return { 
-                success: false, 
-                message: "Quota Limit reached. Your key is valid, but Google is throttling requests." 
-            };
+            return { success: false, message: "Rate limit reached. Ensure billing is active in AI Studio." };
         }
-        return { success: false, message: e.message || "Connection failed. Check your API key." };
+        return { success: false, message: e.message || "Connection failed. Verify your key." };
     }
 };
 
@@ -87,7 +79,7 @@ export const analyzeCardFull = async (f64: string, b64: string): Promise<any> =>
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: { parts: [
-                { text: "Identify this card and provide a professional NGA grade. Return JSON: { \"name\": \"...\", \"team\": \"...\", \"year\": \"...\", \"set\": \"...\", \"company\": \"...\", \"cardNumber\": \"...\", \"edition\": \"...\", \"details\": { \"centering\": {\"grade\": 0, \"notes\": \"\"}, \"corners\": {\"grade\": 0, \"notes\": \"\"}, \"edges\": {\"grade\": 0, \"notes\": \"\"}, \"surface\": {\"grade\": 0, \"notes\": \"\"}, \"printQuality\": {\"grade\": 0, \"notes\": \"\"} }, \"overallGrade\": 0.0, \"gradeName\": \"...\", \"summary\": \"...\" }" },
+                { text: "Identify this card and provide an NGA grade (1-10). Return JSON: { \"name\": \"...\", \"team\": \"...\", \"year\": \"...\", \"set\": \"...\", \"company\": \"...\", \"cardNumber\": \"...\", \"edition\": \"...\", \"details\": { \"centering\": {\"grade\": 0, \"notes\": \"\"}, \"corners\": {\"grade\": 0, \"notes\": \"\"}, \"edges\": {\"grade\": 0, \"notes\": \"\"}, \"surface\": {\"grade\": 0, \"notes\": \"\"}, \"printQuality\": {\"grade\": 0, \"notes\": \"\"} }, \"overallGrade\": 0, \"gradeName\": \"...\", \"summary\": \"...\" }" },
                 { inlineData: { mimeType: 'image/jpeg', data: f64 } },
                 { inlineData: { mimeType: 'image/jpeg', data: b64 } },
             ]},
@@ -99,13 +91,36 @@ export const analyzeCardFull = async (f64: string, b64: string): Promise<any> =>
     }
 };
 
+export const getCardMarketValue = async (card: CardData): Promise<MarketValue> => {
+    try {
+        const ai = getAI();
+        await new Promise(r => setTimeout(r, 1500)); // Small delay after grading
+        
+        const query = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} Grade ${card.overallGrade} sold price ebay psa`;
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: `Find market value for: ${query}. Return JSON: { \"averagePrice\": 0, \"minPrice\": 0, \"maxPrice\": 0, \"currency\": \"USD\", \"notes\": \"...\" }`,
+            config: { tools: [{ googleSearch: {} }] }
+        });
+        const data = extractJson(response);
+        const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({ 
+            title: c.web?.title || 'Sold Listing', 
+            uri: c.web?.uri || '' 
+        })).filter((s: any) => s.uri) || [];
+        
+        return { ...data, sourceUrls: sources };
+    } catch (e) {
+        return handleApiError(e, "market_value");
+    }
+};
+
 export const challengeGrade = async (card: CardData, dir: 'higher' | 'lower', cb: any): Promise<any> => {
     try {
         const ai = getAI();
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: { parts: [
-                { text: `The user believes this card deserves a ${dir} grade than ${card.overallGrade}. Re-evaluate strictly but consider the user's feedback. Return JSON with updated overallGrade, gradeName, details, and summary.` },
+                { text: `Re-evaluate this card bias ${dir} than ${card.overallGrade}. Return updated JSON.` },
             ]},
             config: { systemInstruction: NGA_SYSTEM, responseMimeType: "application/json" }
         });
@@ -121,36 +136,12 @@ export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, i
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: { parts: [
-                { text: `The grader has assigned a manual grade of ${grade} (${name}). Please write a professional analysis and sub-grades that justify this specific score. Return JSON with details and summary.` },
+                { text: `Write a professional analysis justifying a grade of ${grade} (${name}). Return JSON.` },
             ]},
             config: { systemInstruction: NGA_SYSTEM, responseMimeType: "application/json" }
         });
         return extractJson(response);
     } catch (e) {
         return handleApiError(e, "manual_rewrite");
-    }
-};
-
-export const getCardMarketValue = async (card: CardData): Promise<MarketValue> => {
-    try {
-        const ai = getAI();
-        // Add a delay to avoid triggering rate limits after a successful grading
-        await new Promise(r => setTimeout(r, 2000));
-        
-        const query = `${card.year} ${card.company} ${card.set} ${card.name} ${card.cardNumber} Grade ${card.overallGrade} sold price ebay psa bgs`;
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: `Research the current market value for: ${query}. Focus on recent sold listings. Return JSON: { \"averagePrice\": 0, \"minPrice\": 0, \"maxPrice\": 0, \"currency\": \"USD\", \"notes\": \"...\" }`,
-            config: { tools: [{ googleSearch: {} }] }
-        });
-        const data = extractJson(response);
-        const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({ 
-            title: c.web?.title || 'Market Source', 
-            uri: c.web?.uri || '' 
-        })).filter((s: any) => s.uri) || [];
-        
-        return { ...data, sourceUrls: sources };
-    } catch (e) {
-        return handleApiError(e, "market_value");
     }
 };
