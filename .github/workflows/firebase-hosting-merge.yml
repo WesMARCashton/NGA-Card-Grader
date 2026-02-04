@@ -15,6 +15,6 @@ jobs:
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AI_CARD_GRADER_8838F }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NGA_CARD_GRADER_2026 }}
           channelId: live
-          projectId: ai-card-grader-8838f
+          projectId: nga-card-grader-2026
