@@ -85,7 +85,6 @@ export const useGoogleAuth = () => {
             const client = google.accounts.oauth2.initTokenClient({
               client_id: clientId,
               scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/spreadsheets',
-              callback: () => {}, // Callback is overridden per request
             });
             setTokenClient(client);
             setIsAuthReady(true); 
